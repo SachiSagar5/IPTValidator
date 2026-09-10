@@ -70,7 +70,23 @@ export function ChannelPlayer({ channel, onClose }: { channel: Channel; onClose:
           const Hls = (await import("hls.js")).default;
           if (disposed) return;
           if (Hls.isSupported()) {
-            const hls = new Hls({ lowLatencyMode: true, enableWorker: true, maxBufferLength: 20 });
+            const hls = new Hls({
+              lowLatencyMode: true,
+              enableWorker: true,
+              startLevel: -1,
+              startPosition: -1,
+              backBufferLength: 30,
+              maxBufferLength: 10,
+              maxBufferHole: 0.5,
+              maxStarvationDelay: 2,
+              liveSyncDurationCount: 2,
+              liveMaxLatencyDurationCount: 5,
+              manifestLoadingMaxRetry: 2,
+              levelLoadingMaxRetry: 3,
+              fragLoadingMaxRetry: 3,
+              manifestLoadingTimeOut: 8000,
+              fragLoadingTimeOut: 10000,
+            });
             destroy = () => hls.destroy();
             hls.on(Hls.Events.ERROR, (_e, data) => {
               if (data.fatal) fallback(data.details || "Stream could not be played.");
@@ -124,7 +140,14 @@ export function ChannelPlayer({ channel, onClose }: { channel: Channel; onClose:
               : "mpegts";
             const player = mpegts.createPlayer(
               { type, isLive: true, url: src },
-              { enableWorker: true, liveBufferLatencyChasing: true },
+              {
+                enableWorker: true,
+                liveBufferLatencyChasing: true,
+                liveBufferLatencyMaxLatency: 6,
+                liveBufferLatencyMinRemain: 0.5,
+                liveSyncMaxLatency: 6,
+                liveSyncTargetLatency: 2,
+              },
             );
             destroy = () => {
               try {
@@ -167,14 +190,20 @@ export function ChannelPlayer({ channel, onClose }: { channel: Channel; onClose:
   }, [channel.url, engine, direct, attempt]);
 
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-border bg-black/60">
+    <div className="mt-4 overflow-hidden rounded-xl border border-primary/20 bg-black/60 shadow-[0_24px_60px_-30px_oklch(0_0_0/0.9)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface/70 px-3 py-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{channel.name}</p>
           <p className="truncate font-mono text-[11px] text-muted-foreground">{channel.url}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge tone="accent">{engine === "native" ? "built-in" : engine}</Badge>
+          <Badge tone="accent">
+            <span className="relative flex size-1.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-accent/60" />
+              <span className="relative inline-flex size-1.5 rounded-full bg-accent" />
+            </span>
+            {engine === "native" ? "built-in" : engine}
+          </Badge>
           {direct && <Badge>direct</Badge>}
           <Button
             size="sm"

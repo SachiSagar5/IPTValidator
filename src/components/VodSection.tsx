@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Film, PlayCircle } from "lucide-react";
 
 import { ChannelPlayer } from "@/components/ChannelPlayer";
 import { Button } from "@/components/ui/primitives";
@@ -25,13 +25,12 @@ function Poster({
     return (
       <div
         className={cn(
-          "flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 to-accent/20",
+          "flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-primary/25 via-background/40 to-accent/25 px-2 text-center",
           className,
         )}
       >
-        <span className="px-2 text-center text-[11px] leading-tight font-medium text-foreground/70">
-          {name}
-        </span>
+        <Film className="size-4 text-primary/70" />
+        <span className="text-[11px] leading-tight font-medium text-foreground/70">{name}</span>
       </div>
     );
   }
@@ -151,7 +150,7 @@ function EpisodeRow({
         </div>
       )}
       <span className="min-w-0 flex-1 truncate text-sm font-medium">{episode.name}</span>
-      <span className="text-[11px] text-muted-foreground">▶</span>
+      <PlayCircle className="size-4 shrink-0 text-muted-foreground" />
     </button>
   );
 }
@@ -278,13 +277,13 @@ function MoviesPanel({
                     ...(m.logo ? { logo: m.logo } : {}),
                   })
                 }
-                className="group overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-colors hover:border-primary/50 hover:bg-surface"
+                className="group relative overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]"
               >
                 <div className="relative aspect-video w-full">
                   <Poster src={m.logo} name={m.name} />
                   <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
-                    <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      ▶
+                    <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_0_24px_-4px_oklch(0.86_0.19_124/0.9)]">
+                      <PlayCircle className="size-5" />
                     </span>
                   </span>
                 </div>
@@ -388,7 +387,7 @@ function SeriesPanel({
               return (
                 <li
                   key={s.id}
-                  className="overflow-hidden rounded-lg border border-border bg-surface/40"
+                  className="overflow-hidden rounded-lg border border-border bg-surface/40 transition-colors hover:border-primary/30"
                 >
                   <div className="flex items-center gap-3 px-3 py-2">
                     <button
@@ -408,8 +407,17 @@ function SeriesPanel({
                           {s.seasons.length === 0 && s.group && ` · ${s.group}`}
                         </p>
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {loadingIds[s.id] ? "Loading…" : expanded[s.id] ? "▲" : "▶"}
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        {loadingIds[s.id] ? (
+                          "Loading…"
+                        ) : (
+                          <ChevronDown
+                            className={cn(
+                              "size-4 transition-transform",
+                              expanded[s.id] ? "" : "-rotate-90",
+                            )}
+                          />
+                        )}
                       </span>
                     </button>
                     <Button

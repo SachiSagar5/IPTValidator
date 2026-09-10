@@ -90,14 +90,42 @@
   }
 
   body {
+    min-height: 100vh;
     background-color: var(--color-background);
     background-image:
-      radial-gradient(60rem 40rem at 12% -10%, oklch(0.86 0.19 124 / 9%), transparent 70%),
-      radial-gradient(50rem 34rem at 92% 0%, oklch(0.78 0.13 210 / 10%), transparent 70%);
+      radial-gradient(55rem 38rem at 8% -12%, oklch(0.86 0.19 124 / 12%), transparent 65%),
+      radial-gradient(42rem 30rem at 96% -6%, oklch(0.78 0.13 210 / 12%), transparent 65%),
+      radial-gradient(30rem 22rem at 55% 115%, oklch(0.66 0.2 20 / 5%), transparent 60%);
     background-repeat: no-repeat;
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: oklch(0.86 0.19 124 / 30%);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-muted) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-muted);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-secondary);
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   h1,
@@ -108,9 +136,62 @@
   }
 }
 
-@utility panel {
-  background-color: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-panel);
+@layer components {
+  .panel {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-panel);
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      oklch(0.86 0.19 124 / 22%),
+      oklch(0.78 0.13 210 / 8%) 30%,
+      oklch(0.86 0.19 124 / 0%) 55%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+
+  .panel:hover {
+    border-color: oklch(1 0 0 / 16%);
+    box-shadow: var(--shadow-panel), 0 0 0 1px oklch(0.86 0.19 124 / 10%);
+  }
+
+  .rise-in {
+    animation: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .rise-in {
+    transition: none;
+    animation: none;
+  }
 }

@@ -1,7 +1,20 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import {
+  AlertTriangle,
+  Bookmark,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  FileText,
+  Globe,
+  PlayCircle,
+  Radio,
+  Tv,
+  Upload,
+  XCircle,
+} from "lucide-react";
 
 import { ChannelPlayer } from "@/components/ChannelPlayer";
 import { VodSection } from "@/components/VodSection";
@@ -35,6 +48,7 @@ import {
   type VodItem,
 } from "@/lib/panel.functions";
 import { downloadFile, readLegacyLocalPlaylists, safeFileName } from "@/lib/playlist-store";
+import { PENDING_XTREAM_KEY } from "@/lib/accounts";
 
 const TITLE = "StreamCheck — IPTV M3U Validator & Playlist Builder";
 const DESCRIPTION =
@@ -133,6 +147,31 @@ function Dashboard() {
   useEffect(() => {
     if (playing) playerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [playing]);
+
+  useEffect(() => {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(PENDING_XTREAM_KEY);
+      sessionStorage.removeItem(PENDING_XTREAM_KEY);
+    } catch {
+      // storage unavailable — nothing to load
+    }
+    if (!raw) return;
+    try {
+      const creds = JSON.parse(raw) as { server?: string; username?: string; password?: string };
+      if (!creds.server || !creds.username || !creds.password) return;
+      setSourceTab("xtream");
+      setXtreamServer(creds.server);
+      setXtreamUser(creds.username);
+      setXtreamPass(creds.password);
+      notify("ok", "Account loaded — connecting to Xtream Codes…");
+      scrollToSources();
+      void runXtream(creds.server, creds.username, creds.password, true);
+    } catch {
+      // ignore a malformed payload
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const notify = useCallback(
     (tone: "ok" | "error", text: string) => setMessage({ tone, text }),
@@ -678,18 +717,36 @@ function Dashboard() {
 
   return (
     <main className="mx-auto max-w-7xl px-5 py-10">
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+      <header className="rise-in mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="font-mono text-[11px] tracking-[0.25em] text-primary uppercase">
-            Streamcheck
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">IPTV playlist validator</h1>
-          <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+          <div className="flex items-center gap-2.5">
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/50" />
+              <span className="relative inline-flex size-2 rounded-full bg-primary" />
+            </span>
+            <p className="font-mono text-[11px] tracking-[0.3em] text-primary uppercase">
+              Streamcheck · Live signal
+            </p>
+          </div>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-5xl">
+            IPTV playlist{" "}
+            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+              validator
+            </span>
+          </h1>
+          <p className="mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
             Import M3U links or files, check every channel strictly, then save and export a clean
             playlist under your own name.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <Link
+            to="/accounts"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-muted"
+          >
+            <Upload className="size-3.5" />
+            Import accounts
+          </Link>
           <Button variant="ghost" size="sm" onClick={resetAll}>
             Clear workspace
           </Button>
@@ -698,13 +755,18 @@ function Dashboard() {
 
       {message && (
         <div
-          className={`mb-6 rounded-lg border px-4 py-3 text-sm ${
+          className={`mb-6 flex items-start gap-2.5 rounded-lg border px-4 py-3 text-sm ${
             message.tone === "ok"
               ? "border-success/40 bg-success/10 text-success"
               : "border-destructive/40 bg-destructive/10 text-destructive"
           }`}
         >
-          {message.text}
+          {message.tone === "ok" ? (
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          )}
+          <span>{message.text}</span>
         </div>
       )}
 
@@ -716,7 +778,7 @@ function Dashboard() {
               subtitle="Import from M3U links, Xtream Codes, or Stalker Portal."
             >
               <div className="space-y-4">
-                <div className="flex rounded-lg border border-border p-1">
+                <div className="flex rounded-lg border border-border bg-background/40 p-1 shadow-inner">
                   {(
                     [
                       { key: "m3u", label: "M3U Link" },
@@ -885,7 +947,7 @@ function Dashboard() {
             subtitle="Quick scan checks structure and reachability. Deep check opens each stream and inspects the data."
           >
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex rounded-lg border border-border p-1">
+              <div className="flex rounded-lg border border-border bg-background/40 p-1 shadow-inner">
                 {(["quick", "deep"] as Mode[]).map((m) => (
                   <button
                     key={m}
@@ -935,20 +997,47 @@ function Dashboard() {
 
             <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[
-                { label: "Channels", value: stats.total, tone: "text-foreground" },
-                { label: "Working", value: stats.ok, tone: "text-success" },
-                { label: "Failed", value: stats.dead, tone: "text-destructive" },
-                { label: "Unchecked", value: stats.unchecked, tone: "text-muted-foreground" },
+                {
+                  label: "Channels",
+                  value: stats.total,
+                  icon: Tv,
+                  iconClass: "text-foreground",
+                  tone: "text-foreground",
+                },
+                {
+                  label: "Working",
+                  value: stats.ok,
+                  icon: CheckCircle2,
+                  iconClass: "text-success",
+                  tone: "text-success",
+                },
+                {
+                  label: "Failed",
+                  value: stats.dead,
+                  icon: XCircle,
+                  iconClass: "text-destructive",
+                  tone: "text-destructive",
+                },
+                {
+                  label: "Unchecked",
+                  value: stats.unchecked,
+                  icon: Clock3,
+                  iconClass: "text-muted-foreground",
+                  tone: "text-muted-foreground",
+                },
               ].map((s) => (
                 <div
                   key={s.label}
-                  className="rounded-lg border border-border bg-surface/60 px-3 py-3"
+                  className="rounded-lg border border-border bg-surface/60 px-3 py-3 transition-colors hover:border-primary/40"
                 >
-                  <dt className="text-[11px] tracking-wide text-muted-foreground uppercase">
-                    {s.label}
-                  </dt>
-                  <dd className={`mt-1 font-display text-2xl font-semibold ${s.tone}`}>
-                    {s.value}
+                  <div className="flex items-center justify-between">
+                    <dt className="text-[11px] tracking-wide text-muted-foreground uppercase">
+                      {s.label}
+                    </dt>
+                    <s.icon className={`size-4 ${s.iconClass}`} />
+                  </div>
+                  <dd className={`mt-2 font-display text-2xl font-semibold ${s.tone}`}>
+                    {s.value.toLocaleString()}
                   </dd>
                 </div>
               ))}
@@ -1007,19 +1096,27 @@ function Dashboard() {
             }
           >
             {channels.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                No channels yet. Add a playlist link or upload a file above.
-              </p>
+              <div className="flex flex-col items-center gap-3 py-12 text-center">
+                <span className="flex size-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-primary">
+                  <Radio className="size-5" />
+                </span>
+                <div>
+                  <p className="text-sm font-medium">No channels on air yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Add a playlist link or upload a file above, then validate.
+                  </p>
+                </div>
+              </div>
             ) : (
               <div className="max-h-[540px] overflow-auto rounded-lg border border-border">
                 <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-surface text-[11px] tracking-wide text-muted-foreground uppercase">
+                  <thead className="sticky top-0 z-10 bg-surface/90 text-[11px] tracking-[0.08em] text-muted-foreground uppercase backdrop-blur">
                     <tr>
-                      <th className="px-3 py-2 font-medium">Channel</th>
-                      <th className="px-3 py-2 font-medium">Group</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Detail</th>
-                      <th className="px-3 py-2 font-medium">Play</th>
+                      <th className="px-3 py-2.5 font-medium">Channel</th>
+                      <th className="px-3 py-2.5 font-medium">Group</th>
+                      <th className="px-3 py-2.5 font-medium">Status</th>
+                      <th className="px-3 py-2.5 font-medium">Detail</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Play</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1028,39 +1125,71 @@ function Dashboard() {
                       return (
                         <tr
                           key={c.id}
-                          className={`hover:bg-secondary/40 ${playing?.url === c.url ? "bg-primary/10" : ""}`}
+                          className={`transition-colors hover:bg-secondary/40 ${playing?.url === c.url ? "bg-primary/10 ring-1 ring-primary/30 ring-inset" : ""}`}
                         >
-                          <td className="max-w-[260px] px-3 py-2">
-                            <p className="truncate font-medium">{c.name}</p>
-                            <p className="truncate font-mono text-[11px] text-muted-foreground">
-                              {c.url}
-                            </p>
+                          <td className="max-w-[300px] px-3 py-2">
+                            <div className="flex items-center gap-2.5">
+                              {c.logo ? (
+                                <img
+                                  src={c.logo}
+                                  alt=""
+                                  loading="lazy"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                                  }}
+                                  className="h-9 w-14 shrink-0 rounded-md object-cover ring-1 ring-border"
+                                />
+                              ) : (
+                                <span className="flex h-9 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/20 to-accent/20 text-sm font-semibold text-foreground/70 ring-1 ring-border">
+                                  {c.name.charAt(0).toUpperCase()}
+                                </span>
+                              )}
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">{c.name}</p>
+                                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                                  {c.url}
+                                </p>
+                              </div>
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-xs text-muted-foreground">
                             {c.group ?? "—"}
                           </td>
                           <td className="px-3 py-2">
                             {!r ? (
-                              <Badge>not checked</Badge>
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+                                not checked
+                              </span>
                             ) : r.status === "ok" ? (
-                              <Badge tone="success">working · {r.ms}ms</Badge>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-1 text-[11px] font-medium text-success">
+                                <span className="size-1.5 rounded-full bg-success shadow-[0_0_8px_currentColor]" />
+                                working · {r.ms}ms
+                              </span>
                             ) : r.status === "timeout" ? (
-                              <Badge tone="warning">timeout</Badge>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2 py-1 text-[11px] font-medium text-warning">
+                                <span className="size-1.5 rounded-full bg-warning" />
+                                timeout
+                              </span>
                             ) : (
-                              <Badge tone="danger">{r.status}</Badge>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-medium text-destructive">
+                                <span className="size-1.5 rounded-full bg-destructive" />
+                                {r.status}
+                              </span>
                             )}
                           </td>
                           <td className="max-w-[220px] truncate px-3 py-2 text-[11px] text-muted-foreground">
                             {r?.detail ?? (r?.httpStatus ? `HTTP ${r.httpStatus}` : "—")}
                           </td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 text-right">
                             <Button
                               size="sm"
                               variant={playing?.url === c.url ? "primary" : "secondary"}
                               aria-label={`Play ${c.name}`}
                               onClick={() => setPlaying(c)}
                             >
-                              ▶ Play
+                              <PlayCircle className="size-4" />
+                              Play
                             </Button>
                           </td>
                         </tr>
@@ -1150,11 +1279,17 @@ function Dashboard() {
 
           <Panel title="Saved playlists" subtitle={`${saved.length} in this browser`}>
             {saved.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">Nothing saved yet.</p>
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <Bookmark className="size-5 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">Nothing saved yet.</p>
+              </div>
             ) : (
               <ul className="space-y-3">
                 {saved.map((p) => (
-                  <li key={p.id} className="rounded-lg border border-border bg-surface/50 p-3">
+                  <li
+                    key={p.id}
+                    className="rounded-lg border border-border bg-surface/50 p-3 transition-all hover:border-primary/40 hover:bg-surface/80 hover:shadow-[0_10px_28px_-16px_oklch(0_0_0/0.7)]"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{p.name}</p>
@@ -1165,11 +1300,17 @@ function Dashboard() {
                         </p>
                       </div>
                       {p.provider === "xtream" ? (
-                        <Badge tone="accent">Xtream</Badge>
+                        <Badge tone="accent">
+                          <Tv className="size-3" /> Xtream
+                        </Badge>
                       ) : p.provider === "stalker" ? (
-                        <Badge tone="accent">Stalker</Badge>
+                        <Badge tone="accent">
+                          <Radio className="size-3" /> Stalker
+                        </Badge>
                       ) : (
-                        <Badge tone="accent">m3u</Badge>
+                        <Badge tone="accent">
+                          <Globe className="size-3" /> m3u
+                        </Badge>
                       )}
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -1227,11 +1368,17 @@ function Dashboard() {
 
           <Panel title="Drafts" subtitle={`${drafts.length} saved`}>
             {drafts.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">No drafts yet.</p>
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <FileText className="size-5 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">No drafts yet.</p>
+              </div>
             ) : (
               <ul className="space-y-3">
                 {drafts.map((d) => (
-                  <li key={d.id} className="rounded-lg border border-border bg-surface/50 p-3">
+                  <li
+                    key={d.id}
+                    className="rounded-lg border border-border bg-surface/50 p-3 transition-all hover:border-primary/40 hover:bg-surface/80"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{d.name}</p>

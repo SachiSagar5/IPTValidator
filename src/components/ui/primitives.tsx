@@ -1,4 +1,9 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import type {
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  ReactNode,
+  TextareaHTMLAttributes,
+} from "react";
 import { cn } from "@/lib/utils";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -11,12 +16,15 @@ export function Button({ className, variant = "secondary", size = "md", ...props
     <button
       {...props}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-[color,background-color,border-color,box-shadow,transform] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm",
-        variant === "primary" && "bg-primary text-primary-foreground hover:bg-primary/85",
-        variant === "secondary" && "border border-border bg-secondary text-secondary-foreground hover:bg-muted",
+        variant === "primary" &&
+          "bg-primary text-primary-foreground shadow-[0_10px_28px_-12px_oklch(0.86_0.19_124/0.75)] hover:bg-primary/90 hover:shadow-[0_14px_34px_-12px_oklch(0.86_0.19_124/0.9)]",
+        variant === "secondary" &&
+          "border border-border bg-secondary text-secondary-foreground hover:bg-muted hover:border-border",
         variant === "ghost" && "text-muted-foreground hover:bg-secondary hover:text-foreground",
-        variant === "danger" && "border border-destructive/40 text-destructive hover:bg-destructive/10",
+        variant === "danger" &&
+          "border border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60",
         className,
       )}
     />
@@ -61,12 +69,17 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cn("panel p-5", className)}>
+    <section className={cn("panel rise-in p-5", className)}>
       {(title || action) && (
         <header className="mb-4 flex items-start justify-between gap-3">
           <div>
-            {title && <h2 className="text-base font-semibold">{title}</h2>}
-            {subtitle && <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>}
+            {title && (
+              <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+                <span className="size-2 shrink-0 rounded-full bg-gradient-to-br from-primary to-accent shadow-[0_0_10px_oklch(0.86_0.19_124/0.7)]" />
+                {title}
+              </h2>
+            )}
+            {subtitle && <p className="mt-1.5 pl-4 text-xs text-muted-foreground">{subtitle}</p>}
           </div>
           {action}
         </header>

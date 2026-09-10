@@ -71,7 +71,16 @@ async function fetchJson<T = unknown>(url: URL, headers?: Record<string, string>
 // ---------------------------------------------------------------------------
 
 type XtreamAuthResponse = {
-  user_info?: { username?: string; status?: string; exp_date?: string };
+  user_info?: {
+    username?: string;
+    status?: string;
+    exp_date?: string | number;
+    auth?: number;
+    is_trial?: number;
+    active_cons?: number;
+    max_connections?: number;
+    created_at?: string | number;
+  };
   server_info?: { url?: string; port?: string };
 };
 
@@ -171,6 +180,94 @@ export const loginXtream = createServerFn({ method: "POST" })
     // 4. Build M3U and return
     const text = buildXtreamM3u(server, username, password, streams, categoryMap);
     return { text, finalUrl: server, count: streams.length };
+  });
+
+export type XtreamAccountCheck = {
+  ok: boolean;
+  status: string;
+  detail: string;
+  expDate?: string;
+  maxConnections?: number;
+  activeConnections?: number;
+};
+
+function formatExpiry(exp: string | number | undefined): string | undefined {
+  if (exp == null || exp === "") return undefined;
+  const numeric =
+    typeof exp === "number" ? exp : /^-?\d+(\.\d+)?$/.test(exp.trim()) ? Number(exp.trim()) : NaN;
+  if (!Number.isNaN(numeric)) {
+    if (numeric <= 0) return undefined;
+    const ms = numeric > 1e11 ? numeric : numeric * 1000;
+    try {
+      return new Date(ms).toLocaleDateString();
+    } catch {
+      return String(exp);
+    }
+  }
+  return String(exp).trim();
+}
+
+export const checkXtreamAccount = createServerFn({ method: "POST" })
+  .validator((data: { server: string; username: string; password: string }) => {
+    if (!data.server || !data.username || !data.password) {
+      throw new Error("Server, username, and password are required.");
+    }
+    let base = data.server.trim();
+    if (!/^https?:\/\//i.test(base)) base = "http://" + base;
+    return {
+      server: new URL(base).origin,
+      username: data.username.trim(),
+      password: data.password.trim(),
+    };
+  })
+  .handler(async ({ data }): Promise<XtreamAccountCheck> => {
+    const { server, username, password } = data;
+    const api = new URL(`${server}/player_api.php`);
+    api.searchParams.set("username", username);
+    api.searchParams.set("password", password);
+
+    let json: XtreamAuthResponse;
+    try {
+      json = await fetchJson<XtreamAuthResponse>(api);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "network error";
+      return {
+        ok: false,
+        status: "unreachable",
+        detail: `Could not reach the server (${reason}).`,
+      };
+    }
+
+    const info = json.user_info;
+    if (!info) {
+      return { ok: false, status: "invalid", detail: "The server did not return user info." };
+    }
+
+    const statusRaw = (info.status || "").toString();
+    const authOk = info.auth !== undefined ? Number(info.auth) === 1 : true;
+    const statusActive =
+      /active|enabled|ok\b|paid/i.test(statusRaw) &&
+      !/(disabled|expired|banned|not paid|no such|error)/i.test(statusRaw);
+
+    const expDate = formatExpiry(info.exp_date);
+    const maxConnections = info.max_connections;
+    const activeConnections = info.active_cons;
+
+    const parts: string[] = [];
+    if (statusRaw) parts.push(statusRaw);
+    if (expDate) parts.push(`expires ${expDate}`);
+    if (maxConnections != null) parts.push(`max ${maxConnections} conn`);
+    if (activeConnections != null) parts.push(`${activeConnections} active`);
+
+    const ok = authOk && statusActive;
+    return {
+      ok,
+      status: statusRaw || (authOk ? "OK" : "Bad credentials"),
+      detail: parts.join(" · ") || (authOk ? "Credentials accepted." : "Invalid credentials."),
+      ...(expDate ? { expDate } : {}),
+      ...(maxConnections != null ? { maxConnections } : {}),
+      ...(activeConnections != null ? { activeConnections } : {}),
+    };
   });
 
 // ---------------------------------------------------------------------------
