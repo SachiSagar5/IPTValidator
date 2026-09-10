@@ -166,7 +166,7 @@ function CollapsiblePanel({
   action?: ReactNode;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="panel overflow-hidden">
       <div className="p-5">
