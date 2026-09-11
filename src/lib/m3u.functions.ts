@@ -53,7 +53,9 @@ export const fetchPlaylist = createServerFn({ method: "POST" })
         headers: { "user-agent": "VLC/3.0.20 LibVLC/3.0.20", accept: "*/*" },
       }),
     ).catch((e: unknown) => {
-      throw new Error(`Could not reach that link (${e instanceof Error ? e.message : "network error"}).`);
+      throw new Error(
+        `Could not reach that link (${e instanceof Error ? e.message : "network error"}).`,
+      );
     });
 
     if (!res.ok) throw new Error(`The link responded with status ${res.status}.`);
@@ -72,7 +74,7 @@ export const fetchPlaylist = createServerFn({ method: "POST" })
 
 export type ChannelCheck = {
   url: string;
-  status: "ok" | "dead" | "timeout" | "blocked";
+  status: "ok" | "dead" | "timeout" | "blocked" | "expired";
   httpStatus?: number;
   contentType?: string;
   ms: number;
@@ -89,13 +91,101 @@ const STREAM_HINTS = [
   "application/binary",
 ];
 
+const MEDIA_SEGMENT_HINTS = [
+  "mpegurl",
+  "video/",
+  "audio/",
+  "octet-stream",
+  "mp2t",
+  "application/binary",
+  "application/vnd.apple.mpegurl",
+];
+
+const MAX_PLAYLIST_BYTES = 256_000;
+
+/**
+ * A stream is reported by the server but is actually dead. Many providers park
+ * expired streams behind an HTTP 200 with a playlist that has no segments, or a
+ * playlist whose segments 404/403. Return the expiry reason when we can prove it.
+ */
+async function verifyHlsManifest(
+  manifestUrl: string,
+  initialText: string,
+): Promise<{ expired: boolean; detail?: string }> {
+  let text = initialText;
+
+  // The initial read was capped at ~2 KB — if it looks truncated, re-fetch the whole playlist.
+  if (initialText.length >= 2000) {
+    try {
+      const res = await withTimeout(6_000, (signal) =>
+        fetch(manifestUrl, {
+          signal,
+          redirect: "follow",
+          headers: { "user-agent": "VLC/3.0.20 LibVLC/3.0.20", accept: "*/*" },
+        }),
+      );
+      if (res.ok) text = (await res.text()).slice(0, MAX_PLAYLIST_BYTES);
+    } catch {
+      // keep the partial text we already have
+    }
+  }
+
+  // Media segments are every non-directive line in the playlist.
+  const segments = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+
+  if (segments.length === 0) {
+    return { expired: true, detail: "Playlist has no playable segments (expired stream)" };
+  }
+
+  // Verify the first segment actually serves media — expired streams 404 it.
+  try {
+    const segmentUrl = new URL(segments[0]!, manifestUrl).toString();
+    const seg = await withTimeout(6_000, (signal) =>
+      fetch(segmentUrl, {
+        signal,
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "user-agent": "VLC/3.0.20 LibVLC/3.0.20",
+          accept: "*/*",
+          range: "bytes=0-1023",
+        },
+      }),
+    );
+    if (!seg.ok && seg.status !== 206) {
+      return {
+        expired: true,
+        detail: `First segment returned HTTP ${seg.status} (expired stream)`,
+      };
+    }
+    const segContentType = (seg.headers.get("content-type") ?? "").toLowerCase();
+    const looksLikeMedia =
+      segContentType === "" || MEDIA_SEGMENT_HINTS.some((h) => segContentType.includes(h));
+    if (!looksLikeMedia) {
+      return { expired: true, detail: "Segment did not return a media payload (expired stream)" };
+    }
+  } catch {
+    // Timeout / network error for the segment is ambiguous — don't mark expired on that alone.
+  }
+
+  return { expired: false };
+}
+
 async function checkOne(rawUrl: string, mode: "quick" | "deep"): Promise<ChannelCheck> {
   const started = Date.now();
   let url: URL;
   try {
     url = assertPublicHttpUrl(rawUrl);
   } catch (e) {
-    return { url: rawUrl, status: "blocked", ms: 0, detail: e instanceof Error ? e.message : "blocked" };
+    return {
+      url: rawUrl,
+      status: "blocked",
+      ms: 0,
+      detail: e instanceof Error ? e.message : "blocked",
+    };
   }
 
   const timeout = mode === "deep" ? 12_000 : 6_000;
@@ -142,7 +232,14 @@ async function checkOne(rawUrl: string, mode: "quick" | "deep"): Promise<Channel
         };
       }
       if (buf.byteLength === 0) {
-        return { url: rawUrl, status: "dead", httpStatus: res.status, contentType, ms, detail: "Empty response" };
+        return {
+          url: rawUrl,
+          status: "dead",
+          httpStatus: res.status,
+          contentType,
+          ms,
+          detail: "Empty response",
+        };
       }
       if (!looksLikeStream) {
         return {
@@ -154,11 +251,30 @@ async function checkOne(rawUrl: string, mode: "quick" | "deep"): Promise<Channel
           detail: "Response is not a media stream",
         };
       }
+
+      // HLS: parse the playlist and prove at least one segment is alive, otherwise the
+      // stream is parkable "expired" content (200 OK but nothing playable).
+      if (looksLikeHls) {
+        const fullText = new TextDecoder().decode(buf);
+        const finalUrl = res.url || url.toString();
+        const expiry = await verifyHlsManifest(finalUrl, fullText);
+        if (expiry.expired) {
+          return {
+            url: rawUrl,
+            status: "expired",
+            httpStatus: res.status,
+            contentType,
+            ms,
+            ...(expiry.detail ? { detail: expiry.detail } : {}),
+          };
+        }
+      }
     }
 
     return { url: rawUrl, status: "ok", httpStatus: res.status, contentType, ms };
   } catch (e) {
-    const aborted = e instanceof Error && (e.name === "AbortError" || /abort|timeout/i.test(e.message));
+    const aborted =
+      e instanceof Error && (e.name === "AbortError" || /abort|timeout/i.test(e.message));
     return {
       url: rawUrl,
       status: aborted ? "timeout" : "dead",

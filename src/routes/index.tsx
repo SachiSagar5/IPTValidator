@@ -8,6 +8,7 @@ import {
   Clock3,
   FileText,
   Globe,
+  Hourglass,
   PlayCircle,
   Radio,
   Tv,
@@ -95,7 +96,7 @@ function providerMeta(creds: ProviderCreds): Record<string, string> {
     mac: creds.mac,
   };
 }
-type StatusFilter = "all" | "ok" | "dead" | "unchecked";
+type StatusFilter = "all" | "ok" | "dead" | "expired" | "unchecked";
 
 const BATCH = 40;
 
@@ -500,13 +501,21 @@ function Dashboard() {
   const stats = useMemo(() => {
     let ok = 0;
     let dead = 0;
+    let expired = 0;
     for (const c of channels) {
       const r = checks[c.url];
       if (!r) continue;
       if (r.status === "ok") ok++;
+      else if (r.status === "expired") expired++;
       else dead++;
     }
-    return { total: channels.length, ok, dead, unchecked: channels.length - ok - dead };
+    return {
+      total: channels.length,
+      ok,
+      dead,
+      expired,
+      unchecked: channels.length - ok - dead - expired,
+    };
   }, [channels, checks]);
 
   const allGroups = useMemo(() => {
@@ -527,7 +536,8 @@ function Dashboard() {
       .filter((c) => {
         const r = checks[c.url];
         if (filter === "ok" && r?.status !== "ok") return false;
-        if (filter === "dead" && (!r || r.status === "ok")) return false;
+        if (filter === "dead" && (!r || r.status === "ok" || r.status === "expired")) return false;
+        if (filter === "expired" && r?.status !== "expired") return false;
         if (filter === "unchecked" && r) return false;
         if (q && !(c.name.toLowerCase().includes(q) || (c.group ?? "").toLowerCase().includes(q)))
           return false;
@@ -1051,6 +1061,13 @@ function Dashboard() {
                   tone: "text-destructive",
                 },
                 {
+                  label: "Expired",
+                  value: stats.expired,
+                  icon: Hourglass,
+                  iconClass: "text-warning",
+                  tone: "text-warning",
+                },
+                {
                   label: "Unchecked",
                   value: stats.unchecked,
                   icon: Clock3,
@@ -1114,7 +1131,7 @@ function Dashboard() {
                   placeholder="Search name or group"
                   className="w-44"
                 />
-                {(["all", "ok", "dead", "unchecked"] as StatusFilter[]).map((f) => (
+                {(["all", "ok", "dead", "expired", "unchecked"] as StatusFilter[]).map((f) => (
                   <Button
                     key={f}
                     size="sm"
@@ -1202,6 +1219,11 @@ function Dashboard() {
                               <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2 py-1 text-[11px] font-medium text-warning">
                                 <span className="size-1.5 rounded-full bg-warning" />
                                 timeout
+                              </span>
+                            ) : r.status === "expired" ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-medium text-orange-400">
+                                <Hourglass className="size-3" />
+                                expired
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-medium text-destructive">
