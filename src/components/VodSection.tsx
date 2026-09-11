@@ -474,6 +474,7 @@ export function VodSection({
   onSave: (channels: Channel[], defaultName: string) => void;
 }) {
   const [playing, setPlaying] = useState<Channel | null>(null);
+  const [playingKind, setPlayingKind] = useState<"live" | "movie">("movie");
   const [playerKey, setPlayerKey] = useState(0);
   const playerRef = useRef<HTMLDivElement>(null);
 
@@ -485,6 +486,7 @@ export function VodSection({
 
   const play = (c: Channel) => {
     setPlayerKey((k) => k + 1);
+    setPlayingKind("movie");
     setPlaying(c);
   };
 
@@ -501,7 +503,12 @@ export function VodSection({
       )}
       {playing && (
         <div id="vod-player" ref={playerRef}>
-          <ChannelPlayer key={playerKey} channel={playing} onClose={() => setPlaying(null)} />
+          <ChannelPlayer
+            key={playerKey}
+            channel={playing}
+            kind={playingKind}
+            onClose={() => setPlaying(null)}
+          />
         </div>
       )}
     </div>

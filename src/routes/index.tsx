@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   Bookmark,
   CheckCircle2,
   ChevronDown,
@@ -18,7 +17,7 @@ import {
 
 import { ChannelPlayer } from "@/components/ChannelPlayer";
 import { VodSection } from "@/components/VodSection";
-import { Badge, Button, Input, Panel, Textarea } from "@/components/ui/primitives";
+import { Badge, Button, Input, Panel, Spinner, Textarea } from "@/components/ui/primitives";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   buildM3U,
@@ -47,8 +46,14 @@ import {
   type SeriesSeason,
   type VodItem,
 } from "@/lib/panel.functions";
-import { downloadFile, readLegacyLocalPlaylists, safeFileName } from "@/lib/playlist-store";
+import {
+  copyToClipboard,
+  downloadFile,
+  readLegacyLocalPlaylists,
+  safeFileName,
+} from "@/lib/playlist-store";
 import { PENDING_XTREAM_KEY } from "@/lib/accounts";
+import { toast } from "sonner";
 
 const TITLE = "StreamCheck — IPTV M3U Validator & Playlist Builder";
 const DESCRIPTION =
@@ -117,7 +122,6 @@ function Dashboard() {
   const [mode, setMode] = useState<Mode>("quick");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
   const [singleUrl, setSingleUrl] = useState("");
@@ -173,10 +177,22 @@ function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const notify = useCallback(
-    (tone: "ok" | "error", text: string) => setMessage({ tone, text }),
-    [],
-  );
+  const notify = useCallback((tone: "ok" | "error", text: string) => {
+    if (tone === "ok") toast.success(text);
+    else toast.error(text);
+  }, []);
+
+  // Show a loading toast whenever a long-running operation is in progress.
+  useEffect(() => {
+    if (!busy) return;
+    const id = toast.loading("Working…", {
+      description: "This may take a moment.",
+      duration: Infinity,
+    });
+    return () => {
+      toast.dismiss(id);
+    };
+  }, [busy]);
 
   const loadSaved = useCallback(async () => {
     try {
@@ -561,6 +577,24 @@ function Dashboard() {
     downloadFile(safeFileName(playlistName || "streamcheck-playlist", "m3u"), buildM3U(selection));
   }
 
+  async function copyM3U(name: string, content: string) {
+    try {
+      await copyToClipboard(content);
+      notify("ok", `Copied "${name}" to the clipboard.`);
+    } catch {
+      notify("error", "Could not copy the playlist.");
+    }
+  }
+
+  function copyGroup(name: string) {
+    const groupChannels = channels.filter((c) => (c.group ?? "Ungrouped") === name);
+    if (groupChannels.length === 0) {
+      notify("error", "That group has no channels to copy.");
+      return;
+    }
+    void copyM3U(`iptv-${name}`, buildM3U(groupChannels));
+  }
+
   function exportGroup(name: string) {
     const groupChannels = channels.filter((c) => (c.group ?? "Ungrouped") === name);
     if (groupChannels.length === 0) {
@@ -753,23 +787,6 @@ function Dashboard() {
         </div>
       </header>
 
-      {message && (
-        <div
-          className={`mb-6 flex items-start gap-2.5 rounded-lg border px-4 py-3 text-sm ${
-            message.tone === "ok"
-              ? "border-success/40 bg-success/10 text-success"
-              : "border-destructive/40 bg-destructive/10 text-destructive"
-          }`}
-        >
-          {message.tone === "ok" ? (
-            <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-          ) : (
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
-
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
           <div ref={sourcesRef}>
@@ -816,6 +833,7 @@ function Dashboard() {
                         disabled={busy}
                         onClick={() => void addSingleUrl(singleUrl)}
                       >
+                        {busy && <Spinner />}
                         Fetch link
                       </Button>
                     </div>
@@ -833,6 +851,7 @@ function Dashboard() {
                       />
                       <div className="mt-2 flex items-center gap-2">
                         <Button size="sm" disabled={busy} onClick={() => void addBulkUrls()}>
+                          {busy && <Spinner />}
                           Fetch all links
                         </Button>
                         <span className="text-xs text-muted-foreground">
@@ -884,7 +903,13 @@ function Dashboard() {
                       disabled={busy}
                       onClick={() => void handleXtreamLogin()}
                     >
-                      {busy ? "Connecting…" : "Connect & load streams"}
+                      {busy ? (
+                        <>
+                          <Spinner /> Connecting…
+                        </>
+                      ) : (
+                        "Connect & load streams"
+                      )}
                     </Button>
                     <p className="text-[11px] text-muted-foreground">
                       Authenticates with the Xtream Codes API, fetches all live stream categories
@@ -911,7 +936,13 @@ function Dashboard() {
                       disabled={busy}
                       onClick={() => void handleStalkerLogin()}
                     >
-                      {busy ? "Connecting…" : "Connect & load streams"}
+                      {busy ? (
+                        <>
+                          <Spinner /> Connecting…
+                        </>
+                      ) : (
+                        "Connect & load streams"
+                      )}
                     </Button>
                     <p className="text-[11px] text-muted-foreground">
                       Authenticates with the Stalker/Ministra portal using your MAC address,
@@ -963,6 +994,7 @@ function Dashboard() {
                 ))}
               </div>
               <Button variant="primary" disabled={busy} onClick={() => void validate(channels)}>
+                {busy && <Spinner />}
                 Validate all channels
               </Button>
               <Button
@@ -974,7 +1006,7 @@ function Dashboard() {
               </Button>
               {busy && progress && (
                 <Button size="sm" variant="danger" onClick={() => (cancelRef.current = true)}>
-                  Stop
+                  <Spinner /> Stop
                 </Button>
               )}
             </div>
@@ -1202,7 +1234,7 @@ function Dashboard() {
 
             {playing && (
               <div ref={playerRef}>
-                <ChannelPlayer channel={playing} onClose={() => setPlaying(null)} />
+                <ChannelPlayer channel={playing} kind="live" onClose={() => setPlaying(null)} />
               </div>
             )}
           </Panel>
@@ -1240,7 +1272,7 @@ function Dashboard() {
                 size="sm"
                 variant="ghost"
                 className="w-full"
-                disabled={channels.length === 0}
+                disabled={channels.length === 0 || draftBusy}
                 onClick={async () => {
                   if (channels.length === 0) {
                     notify("error", "Nothing to save as draft.");
@@ -1272,7 +1304,7 @@ function Dashboard() {
                   }
                 }}
               >
-                Save as Draft
+                {draftBusy && <Spinner />} Save as Draft
               </Button>
             </div>
           </Panel>
@@ -1321,6 +1353,13 @@ function Dashboard() {
                         }
                       >
                         Export
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void copyM3U(p.name, buildM3U(p.channels))}
+                      >
+                        Copy
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => loadSavedPlaylist(p)}>
                         Load
@@ -1436,6 +1475,13 @@ function Dashboard() {
                       >
                         Export
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void copyM3U(d.name, d.content)}
+                      >
+                        Copy
+                      </Button>
                     </div>
                   </li>
                 ))}
@@ -1473,7 +1519,13 @@ function Dashboard() {
                       disabled={groupExportBusy}
                       onClick={() => void exportAllGroups()}
                     >
-                      {groupExportBusy ? "Exporting…" : "Export all"}
+                      {groupExportBusy ? (
+                        <>
+                          <Spinner /> Exporting…
+                        </>
+                      ) : (
+                        "Export all"
+                      )}
                     </Button>
                   </div>
                   <ul className="mt-3 space-y-2 text-sm">
@@ -1489,6 +1541,9 @@ function Dashboard() {
                           <Badge tone="muted">{total}</Badge>
                           <Button size="sm" variant="secondary" onClick={() => exportGroup(name)}>
                             Export
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => copyGroup(name)}>
+                            Copy
                           </Button>
                         </div>
                       </li>
