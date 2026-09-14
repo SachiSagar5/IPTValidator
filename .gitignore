@@ -1,6 +1,9 @@
 # Local data store
 db.json
 db.json.tmp
+db-backup.db
+db-backup.db-shm
+db-backup.db-wal
 
 # Logs
 logs

@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-const MAX_BYTES = 12_000_000;
+const MAX_BYTES = 100_000_000;
 const MAX_BATCH = 120;
 
 function assertPublicHttpUrl(raw: string): URL {
@@ -61,7 +61,7 @@ export const fetchPlaylist = createServerFn({ method: "POST" })
     if (!res.ok) throw new Error(`The link responded with status ${res.status}.`);
 
     const len = Number(res.headers.get("content-length") ?? 0);
-    if (len && len > MAX_BYTES) throw new Error("That playlist is too large (over 12 MB).");
+    if (len && len > MAX_BYTES) throw new Error("That playlist is too large (over 100 MB).");
 
     const text = (await res.text()).slice(0, MAX_BYTES);
     return {

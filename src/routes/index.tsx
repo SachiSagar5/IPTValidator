@@ -99,6 +99,7 @@ function providerMeta(creds: ProviderCreds): Record<string, string> {
 type StatusFilter = "all" | "ok" | "dead" | "expired" | "unchecked";
 
 const BATCH = 40;
+const CHANNEL_PAGE_SIZE = 100;
 
 function Dashboard() {
   const fetchRemote = useServerFn(fetchPlaylist);
@@ -133,9 +134,12 @@ function Dashboard() {
   const [playing, setPlaying] = useState<Channel | null>(null);
   const [groupExportBusy, setGroupExportBusy] = useState(false);
   const [groupExportOpen, setGroupExportOpen] = useState(true);
+  const [savePlaylistOpen, setSavePlaylistOpen] = useState(true);
+  const [savedPlaylistsOpen, setSavedPlaylistsOpen] = useState(true);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draftBusy, setDraftBusy] = useState(false);
   const [sourceTab, setSourceTab] = useState<"m3u" | "xtream" | "stalker">("m3u");
+  const [channelPage, setChannelPage] = useState(1);
   const [xtreamServer, setXtreamServer] = useState("");
   const [xtreamUser, setXtreamUser] = useState("");
   const [xtreamPass, setXtreamPass] = useState("");
@@ -148,9 +152,20 @@ function Dashboard() {
   const fileRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<HTMLDivElement>(null);
   const sourcesRef = useRef<HTMLDivElement>(null);
+  const [playerHeight, setPlayerHeight] = useState(0);
 
   useEffect(() => {
     if (playing) playerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [playing]);
+
+  useEffect(() => {
+    const el = playerRef.current;
+    if (!el) return;
+    const update = () => setPlayerHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [playing]);
 
   useEffect(() => {
@@ -532,19 +547,28 @@ function Dashboard() {
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return channels
-      .filter((c) => {
-        const r = checks[c.url];
-        if (filter === "ok" && r?.status !== "ok") return false;
-        if (filter === "dead" && (!r || r.status === "ok" || r.status === "expired")) return false;
-        if (filter === "expired" && r?.status !== "expired") return false;
-        if (filter === "unchecked" && r) return false;
-        if (q && !(c.name.toLowerCase().includes(q) || (c.group ?? "").toLowerCase().includes(q)))
-          return false;
-        return true;
-      })
-      .slice(0, 400);
+    return channels.filter((c) => {
+      const r = checks[c.url];
+      if (filter === "ok" && r?.status !== "ok") return false;
+      if (filter === "dead" && (!r || r.status === "ok" || r.status === "expired")) return false;
+      if (filter === "expired" && r?.status !== "expired") return false;
+      if (filter === "unchecked" && r) return false;
+      if (q && !(c.name.toLowerCase().includes(q) || (c.group ?? "").toLowerCase().includes(q)))
+        return false;
+      return true;
+    });
   }, [channels, checks, filter, search]);
+
+  const channelPages = Math.max(1, Math.ceil(visible.length / CHANNEL_PAGE_SIZE));
+  const safeChannelPage = Math.min(channelPage, channelPages);
+  const pageRows = visible.slice(
+    (safeChannelPage - 1) * CHANNEL_PAGE_SIZE,
+    safeChannelPage * CHANNEL_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setChannelPage(1);
+  }, [filter, search, channels]);
 
   function currentSelection(): Channel[] {
     return workingOnly ? channels.filter((c) => checks[c.url]?.status === "ok") : channels;
@@ -1122,7 +1146,7 @@ function Dashboard() {
 
           <Panel
             title="Channels"
-            subtitle={`${visible.length} shown${channels.length > visible.length ? ` of ${channels.length}` : ""}`}
+            subtitle={`${visible.length} of ${channels.length} channels`}
             action={
               <div className="flex flex-wrap items-center gap-2">
                 <Input
@@ -1157,101 +1181,126 @@ function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="max-h-[540px] overflow-auto rounded-lg border border-border">
-                <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 z-10 bg-surface/90 text-[11px] tracking-[0.08em] text-muted-foreground uppercase backdrop-blur">
-                    <tr>
-                      <th className="px-3 py-2.5 font-medium">Channel</th>
-                      <th className="px-3 py-2.5 font-medium">Group</th>
-                      <th className="px-3 py-2.5 font-medium">Status</th>
-                      <th className="px-3 py-2.5 font-medium">Detail</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Play</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {visible.map((c) => {
-                      const r = checks[c.url];
-                      return (
-                        <tr
-                          key={c.id}
-                          className={`transition-colors hover:bg-secondary/40 ${playing?.url === c.url ? "bg-primary/10 ring-1 ring-primary/30 ring-inset" : ""}`}
-                        >
-                          <td className="max-w-[300px] px-3 py-2">
-                            <div className="flex items-center gap-2.5">
-                              {c.logo ? (
-                                <img
-                                  src={c.logo}
-                                  alt=""
-                                  loading="lazy"
-                                  onError={(e) => {
-                                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                                  }}
-                                  className="h-9 w-14 shrink-0 rounded-md object-cover ring-1 ring-border"
-                                />
+              <>
+                <div className="max-h-[540px] overflow-auto rounded-lg border border-border">
+                  <table className="w-full text-left text-sm">
+                    <thead className="sticky top-0 z-10 bg-surface/90 text-[11px] tracking-[0.08em] text-muted-foreground uppercase backdrop-blur">
+                      <tr>
+                        <th className="px-3 py-2.5 font-medium">Channel</th>
+                        <th className="px-3 py-2.5 font-medium">Group</th>
+                        <th className="px-3 py-2.5 font-medium">Status</th>
+                        <th className="px-3 py-2.5 font-medium">Detail</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Play</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {pageRows.map((c) => {
+                        const r = checks[c.url];
+                        return (
+                          <tr
+                            key={c.id}
+                            className={`transition-colors hover:bg-secondary/40 ${playing?.url === c.url ? "bg-primary/10 ring-1 ring-primary/30 ring-inset" : ""}`}
+                          >
+                            <td className="max-w-[300px] px-3 py-2">
+                              <div className="flex items-center gap-2.5">
+                                {c.logo ? (
+                                  <img
+                                    src={c.logo}
+                                    alt=""
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                                    }}
+                                    className="h-9 w-14 shrink-0 rounded-md object-cover ring-1 ring-border"
+                                  />
+                                ) : (
+                                  <span className="flex h-9 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/20 to-accent/20 text-sm font-semibold text-foreground/70 ring-1 ring-border">
+                                    {c.name.charAt(0).toUpperCase()}
+                                  </span>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">{c.name}</p>
+                                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                                    {c.url}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-xs text-muted-foreground">
+                              {c.group ?? "—"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {!r ? (
+                                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+                                  not checked
+                                </span>
+                              ) : r.status === "ok" ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-1 text-[11px] font-medium text-success">
+                                  <span className="size-1.5 rounded-full bg-success shadow-[0_0_8px_currentColor]" />
+                                  working · {r.ms}ms
+                                </span>
+                              ) : r.status === "timeout" ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2 py-1 text-[11px] font-medium text-warning">
+                                  <span className="size-1.5 rounded-full bg-warning" />
+                                  timeout
+                                </span>
+                              ) : r.status === "expired" ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-medium text-orange-400">
+                                  <Hourglass className="size-3" />
+                                  expired
+                                </span>
                               ) : (
-                                <span className="flex h-9 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/20 to-accent/20 text-sm font-semibold text-foreground/70 ring-1 ring-border">
-                                  {c.name.charAt(0).toUpperCase()}
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-medium text-destructive">
+                                  <span className="size-1.5 rounded-full bg-destructive" />
+                                  {r.status}
                                 </span>
                               )}
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">{c.name}</p>
-                                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                                  {c.url}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground">
-                            {c.group ?? "—"}
-                          </td>
-                          <td className="px-3 py-2">
-                            {!r ? (
-                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                                <span className="size-1.5 rounded-full bg-muted-foreground/50" />
-                                not checked
-                              </span>
-                            ) : r.status === "ok" ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-1 text-[11px] font-medium text-success">
-                                <span className="size-1.5 rounded-full bg-success shadow-[0_0_8px_currentColor]" />
-                                working · {r.ms}ms
-                              </span>
-                            ) : r.status === "timeout" ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2 py-1 text-[11px] font-medium text-warning">
-                                <span className="size-1.5 rounded-full bg-warning" />
-                                timeout
-                              </span>
-                            ) : r.status === "expired" ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-medium text-orange-400">
-                                <Hourglass className="size-3" />
-                                expired
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-medium text-destructive">
-                                <span className="size-1.5 rounded-full bg-destructive" />
-                                {r.status}
-                              </span>
-                            )}
-                          </td>
-                          <td className="max-w-[220px] truncate px-3 py-2 text-[11px] text-muted-foreground">
-                            {r?.detail ?? (r?.httpStatus ? `HTTP ${r.httpStatus}` : "—")}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <Button
-                              size="sm"
-                              variant={playing?.url === c.url ? "primary" : "secondary"}
-                              aria-label={`Play ${c.name}`}
-                              onClick={() => setPlaying(c)}
-                            >
-                              <PlayCircle className="size-4" />
-                              Play
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            </td>
+                            <td className="max-w-[220px] truncate px-3 py-2 text-[11px] text-muted-foreground">
+                              {r?.detail ?? (r?.httpStatus ? `HTTP ${r.httpStatus}` : "—")}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <Button
+                                size="sm"
+                                variant={playing?.url === c.url ? "primary" : "secondary"}
+                                aria-label={`Play ${c.name}`}
+                                onClick={() => setPlaying(c)}
+                              >
+                                <PlayCircle className="size-4" />
+                                Play
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    Page {safeChannelPage} of {channelPages} · {visible.length} channels
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={safeChannelPage <= 1}
+                      onClick={() => setChannelPage(safeChannelPage - 1)}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={safeChannelPage >= channelPages}
+                      onClick={() => setChannelPage(safeChannelPage + 1)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
 
             {playing && (
@@ -1263,169 +1312,217 @@ function Dashboard() {
         </div>
 
         <aside className="space-y-5">
-          <Panel
-            title="Save playlist"
-            subtitle="Stored in this browser and exportable as an .m3u file."
-          >
-            <div className="space-y-3">
-              <Input
-                value={playlistName}
-                onChange={(e) => setPlaylistName(e.target.value)}
-                placeholder="My sports channels"
-              />
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={workingOnly}
-                  onChange={(e) => setWorkingOnly(e.target.checked)}
-                  className="size-4 accent-[oklch(0.86_0.19_124)]"
-                />
-                Include only channels that passed validation ({stats.ok})
-              </label>
-              <div className="flex gap-2">
-                <Button variant="primary" className="flex-1" onClick={handleSave}>
-                  Save
-                </Button>
-                <Button className="flex-1" onClick={exportNow}>
-                  Export .m3u
-                </Button>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="w-full"
-                disabled={channels.length === 0 || draftBusy}
-                onClick={async () => {
-                  if (channels.length === 0) {
-                    notify("error", "Nothing to save as draft.");
-                    return;
-                  }
-                  setDraftBusy(true);
-                  try {
-                    const content = buildM3U(
-                      workingOnly
-                        ? channels.filter((c) => checks[c.url]?.status === "ok")
-                        : channels,
-                    );
-                    if (!content.trim()) {
-                      notify("error", "No channels to save as draft.");
-                      return;
-                    }
-                    await saveDraftFns({
-                      data: {
-                        name: playlistName.trim() || "Untitled draft",
-                        content,
-                      },
-                    });
-                    await loadDrafts();
-                    notify("ok", "Saved as draft.");
-                  } catch (e) {
-                    notify("error", e instanceof Error ? e.message : "Could not save draft.");
-                  } finally {
-                    setDraftBusy(false);
-                  }
-                }}
-              >
-                {draftBusy && <Spinner />} Save as Draft
-              </Button>
-            </div>
-          </Panel>
-
-          <Panel title="Saved playlists" subtitle={`${saved.length} in this browser`}>
-            {saved.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-center">
-                <Bookmark className="size-5 text-muted-foreground/60" />
-                <p className="text-sm text-muted-foreground">Nothing saved yet.</p>
-              </div>
-            ) : (
-              <ul className="space-y-3">
-                {saved.map((p) => (
-                  <li
-                    key={p.id}
-                    className="rounded-lg border border-border bg-surface/50 p-3 transition-all hover:border-primary/40 hover:bg-surface/80 hover:shadow-[0_10px_28px_-16px_oklch(0_0_0/0.7)]"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{p.name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {p.channels.length} channels · {new Date(p.createdAt).toLocaleString()}
-                          {p.provider === "xtream" && " · creds saved"}
-                          {p.provider === "stalker" && " · portal saved"}
-                        </p>
-                      </div>
-                      {p.provider === "xtream" ? (
-                        <Badge tone="accent">
-                          <Tv className="size-3" /> Xtream
-                        </Badge>
-                      ) : p.provider === "stalker" ? (
-                        <Badge tone="accent">
-                          <Radio className="size-3" /> Stalker
-                        </Badge>
-                      ) : (
-                        <Badge tone="accent">
-                          <Globe className="size-3" /> m3u
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          downloadFile(safeFileName(p.name, "m3u"), buildM3U(p.channels))
+          <Collapsible open={savePlaylistOpen} onOpenChange={setSavePlaylistOpen} className="panel">
+            <div className="p-5">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 text-left select-none"
+                >
+                  <div>
+                    <h2 className="text-base font-semibold">Save playlist</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Stored in this browser and exportable as an .m3u file.
+                    </p>
+                  </div>
+                  <ChevronDown
+                    className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                      savePlaylistOpen ? "" : "-rotate-90"
+                    }`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="mt-4 space-y-3">
+                  <Input
+                    value={playlistName}
+                    onChange={(e) => setPlaylistName(e.target.value)}
+                    placeholder="My sports channels"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={workingOnly}
+                      onChange={(e) => setWorkingOnly(e.target.checked)}
+                      className="size-4 accent-[oklch(0.86_0.19_124)]"
+                    />
+                    Include only channels that passed validation ({stats.ok})
+                  </label>
+                  <div className="flex gap-2">
+                    <Button variant="primary" className="flex-1" onClick={handleSave}>
+                      Save
+                    </Button>
+                    <Button className="flex-1" onClick={exportNow}>
+                      Export .m3u
+                    </Button>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full"
+                    disabled={channels.length === 0 || draftBusy}
+                    onClick={async () => {
+                      if (channels.length === 0) {
+                        notify("error", "Nothing to save as draft.");
+                        return;
+                      }
+                      setDraftBusy(true);
+                      try {
+                        const content = buildM3U(
+                          workingOnly
+                            ? channels.filter((c) => checks[c.url]?.status === "ok")
+                            : channels,
+                        );
+                        if (!content.trim()) {
+                          notify("error", "No channels to save as draft.");
+                          return;
                         }
-                      >
-                        Export
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => void copyM3U(p.name, buildM3U(p.channels))}
-                      >
-                        Copy
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => loadSavedPlaylist(p)}>
-                        Load
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          const next = window.prompt("New name", p.name);
-                          if (!next) return;
-                          void (async () => {
-                            try {
-                              await renameSaved({ data: { id: p.id, name: next } });
-                              await loadSaved();
-                            } catch {
-                              notify("error", "Could not rename the playlist.");
-                            }
-                          })();
-                        }}
-                      >
-                        Rename
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              await deleteSaved({ data: { id: p.id } });
-                              await loadSaved();
-                            } catch {
-                              notify("error", "Could not delete the playlist.");
-                            }
-                          })();
-                        }}
-                      >
-                        Delete
-                      </Button>
+                        await saveDraftFns({
+                          data: {
+                            name: playlistName.trim() || "Untitled draft",
+                            content,
+                          },
+                        });
+                        await loadDrafts();
+                        notify("ok", "Saved as draft.");
+                      } catch (e) {
+                        notify("error", e instanceof Error ? e.message : "Could not save draft.");
+                      } finally {
+                        setDraftBusy(false);
+                      }
+                    }}
+                  >
+                    {draftBusy && <Spinner />} Save as Draft
+                  </Button>
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+
+          <Collapsible
+            open={savedPlaylistsOpen}
+            onOpenChange={setSavedPlaylistsOpen}
+            className="panel"
+          >
+            <div className="p-5">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 text-left select-none"
+                >
+                  <div>
+                    <h2 className="text-base font-semibold">Saved playlists</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {saved.length} in this browser
+                    </p>
+                  </div>
+                  <ChevronDown
+                    className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                      savedPlaylistsOpen ? "" : "-rotate-90"
+                    }`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="mt-4">
+                  {saved.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 py-8 text-center">
+                      <Bookmark className="size-5 text-muted-foreground/60" />
+                      <p className="text-sm text-muted-foreground">Nothing saved yet.</p>
                     </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
+                  ) : (
+                    <ul className="space-y-3">
+                      {saved.map((p) => (
+                        <li
+                          key={p.id}
+                          className="rounded-lg border border-border bg-surface/50 p-3 transition-all hover:border-primary/40 hover:bg-surface/80 hover:shadow-[0_10px_28px_-16px_oklch(0_0_0/0.7)]"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{p.name}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {p.channels.length} channels ·{" "}
+                                {new Date(p.createdAt).toLocaleString()}
+                                {p.provider === "xtream" && " · creds saved"}
+                                {p.provider === "stalker" && " · portal saved"}
+                              </p>
+                            </div>
+                            {p.provider === "xtream" ? (
+                              <Badge tone="accent">
+                                <Tv className="size-3" /> Xtream
+                              </Badge>
+                            ) : p.provider === "stalker" ? (
+                              <Badge tone="accent">
+                                <Radio className="size-3" /> Stalker
+                              </Badge>
+                            ) : (
+                              <Badge tone="accent">
+                                <Globe className="size-3" /> m3u
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                downloadFile(safeFileName(p.name, "m3u"), buildM3U(p.channels))
+                              }
+                            >
+                              Export
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => void copyM3U(p.name, buildM3U(p.channels))}
+                            >
+                              Copy
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => loadSavedPlaylist(p)}>
+                              Load
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                const next = window.prompt("New name", p.name);
+                                if (!next) return;
+                                void (async () => {
+                                  try {
+                                    await renameSaved({ data: { id: p.id, name: next } });
+                                    await loadSaved();
+                                  } catch {
+                                    notify("error", "Could not rename the playlist.");
+                                  }
+                                })();
+                              }}
+                            >
+                              Rename
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => {
+                                void (async () => {
+                                  try {
+                                    await deleteSaved({ data: { id: p.id } });
+                                    await loadSaved();
+                                  } catch {
+                                    notify("error", "Could not delete the playlist.");
+                                  }
+                                })();
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
 
           <Panel title="Drafts" subtitle={`${drafts.length} saved`}>
             {drafts.length === 0 ? (
@@ -1550,7 +1647,10 @@ function Dashboard() {
                       )}
                     </Button>
                   </div>
-                  <ul className="mt-3 space-y-2 text-sm">
+                  <ul
+                    className="mt-3 space-y-2 overflow-y-auto text-sm"
+                    style={{ maxHeight: `${Math.max(playerHeight, 540)}px` }}
+                  >
                     {allGroups.map(([name, { total, working }]) => (
                       <li key={name} className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
