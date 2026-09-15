@@ -4,6 +4,13 @@ db.json.tmp
 db-backup.db
 db-backup.db-shm
 db-backup.db-wal
+db.db
+db.db-shm
+db.db-wal
+
+# Local env (never commit secrets)
+.env
+.env.local
 
 # Logs
 logs
@@ -22,6 +29,7 @@ dist-ssr
 .tanstack/**
 .nitro
 *.local
+.vercel/
 
 # Wrangler / Cloudflare
 .wrangler/
