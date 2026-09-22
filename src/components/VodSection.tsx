@@ -1,15 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Film, PlayCircle } from "lucide-react";
+import { ChevronDown, Copy, Film, PlayCircle } from "lucide-react";
+import { toast } from "sonner";
 
 import { ChannelPlayer } from "@/components/ChannelPlayer";
-import { Button } from "@/components/ui/primitives";
+import { Button, Spinner } from "@/components/ui/primitives";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import type { Channel } from "@/lib/m3u";
+import { buildM3U, type Channel } from "@/lib/m3u";
+import { copyToClipboard } from "@/lib/playlist-store";
 import type { SeriesItem, SeriesSeason, VodItem } from "@/lib/panel.functions";
 
 const MOVIES_PER_PAGE = 50;
 const SERIES_PER_PAGE = 24;
+
+async function copyText(label: string, text: string) {
+  try {
+    await copyToClipboard(text);
+    toast.success(`Copied "${label}" to the clipboard.`);
+  } catch {
+    toast.error("Could not copy to the clipboard.");
+  }
+}
 
 function Poster({
   src,
@@ -265,35 +276,50 @@ function MoviesPanel({
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
             {visible.map((m) => (
-              <button
+              <div
                 key={m.id}
-                type="button"
-                onClick={() =>
-                  onPlay({
-                    id: `mov-${m.id}`,
-                    name: m.name,
-                    url: m.url,
-                    ...(m.group ? { group: m.group } : {}),
-                    ...(m.logo ? { logo: m.logo } : {}),
-                  })
-                }
-                className="group relative overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]"
+                className="group flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]"
               >
-                <div className="relative aspect-video w-full">
-                  <Poster src={m.logo} name={m.name} />
-                  <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
-                    <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_0_24px_-4px_oklch(0.86_0.19_124/0.9)]">
-                      <PlayCircle className="size-5" />
+                <button
+                  type="button"
+                  onClick={() =>
+                    onPlay({
+                      id: `mov-${m.id}`,
+                      name: m.name,
+                      url: m.url,
+                      ...(m.group ? { group: m.group } : {}),
+                      ...(m.logo ? { logo: m.logo } : {}),
+                    })
+                  }
+                  className="block w-full text-left"
+                >
+                  <div className="relative aspect-video w-full">
+                    <Poster src={m.logo} name={m.name} />
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
+                      <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_0_24px_-4px_oklch(0.86_0.19_124/0.9)]">
+                        <PlayCircle className="size-5" />
+                      </span>
                     </span>
-                  </span>
+                  </div>
+                  <div className="px-3 py-2">
+                    <p className="truncate text-sm font-medium">{m.name}</p>
+                    {m.group && (
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{m.group}</p>
+                    )}
+                  </div>
+                </button>
+                <div className="mt-auto flex items-center gap-2 border-t border-border/60 px-3 py-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="flex-1"
+                    onClick={() => void copyText(m.name, buildM3U(toChannels([m])))}
+                  >
+                    <Copy className="size-3.5" />
+                    Copy
+                  </Button>
                 </div>
-                <div className="px-3 py-2">
-                  <p className="truncate text-sm font-medium">{m.name}</p>
-                  {m.group && (
-                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{m.group}</p>
-                  )}
-                </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
@@ -370,7 +396,7 @@ function SeriesPanel({
         {visible.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No series in this group.</p>
         ) : (
-          <ul className="space-y-2">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
             {visible.map((s) => {
               const episodes: Channel[] = s.seasons.flatMap((season) =>
                 season.episodes.map((ep) => ({
@@ -384,42 +410,54 @@ function SeriesPanel({
                   ...(ep.logo ? { logo: ep.logo } : {}),
                 })),
               );
+              const isExpanded = !!expanded[s.id];
               return (
-                <li
+                <div
                   key={s.id}
-                  className="overflow-hidden rounded-lg border border-border bg-surface/40 transition-colors hover:border-primary/30"
+                  className="group flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]"
                 >
-                  <div className="flex items-center gap-3 px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => void toggleS(s.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left transition-colors hover:bg-secondary/40"
-                    >
-                      <div className="h-12 w-20 shrink-0 overflow-hidden rounded">
-                        <Poster src={s.logo} name={s.name} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{s.name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {s.seasons.length > 0
-                            ? `${s.seasons.length} seasons`
-                            : (s.group ?? "Series")}
-                          {s.seasons.length === 0 && s.group && ` · ${s.group}`}
-                        </p>
-                      </div>
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        {loadingIds[s.id] ? (
-                          "Loading…"
-                        ) : (
-                          <ChevronDown
-                            className={cn(
-                              "size-4 transition-transform",
-                              expanded[s.id] ? "" : "-rotate-90",
-                            )}
-                          />
-                        )}
+                  <button
+                    type="button"
+                    onClick={() => void toggleS(s.id)}
+                    className="block w-full text-left"
+                  >
+                    <div className="relative aspect-video w-full">
+                      <Poster src={s.logo} name={s.name} />
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
+                        <span className="flex size-10 items-center justify-center rounded-full bg-surface/90 text-foreground shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]">
+                          {loadingIds[s.id] ? (
+                            <Spinner className="size-5" />
+                          ) : (
+                            <ChevronDown
+                              className={cn(
+                                "size-5 transition-transform",
+                                isExpanded ? "" : "-rotate-90",
+                              )}
+                            />
+                          )}
+                        </span>
                       </span>
-                    </button>
+                    </div>
+                    <div className="px-3 py-2">
+                      <p className="truncate text-sm font-medium">{s.name}</p>
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {s.seasons.length > 0
+                          ? `${s.seasons.length} seasons`
+                          : (s.group ?? "Series")}
+                        {s.seasons.length === 0 && s.group && ` · ${s.group}`}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="mt-auto flex items-center gap-2 border-t border-border/60 px-3 py-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="flex-1"
+                      onClick={() => void copyText(`Series · ${s.name}`, buildM3U(episodes))}
+                    >
+                      <Copy className="size-3.5" />
+                      Copy
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -429,7 +467,7 @@ function SeriesPanel({
                       Save
                     </Button>
                   </div>
-                  {expanded[s.id] && (
+                  {isExpanded && (
                     <div className="space-y-2 border-t border-border bg-background/40 p-3">
                       {s.seasons.length === 0 ? (
                         <p className="text-center text-xs text-muted-foreground">
@@ -451,10 +489,10 @@ function SeriesPanel({
                       )}
                     </div>
                   )}
-                </li>
+                </div>
               );
             })}
-          </ul>
+          </div>
         )}
         <Pager page={page} pages={pages} onPage={setPage} total={filtered.length} />
       </div>

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  Copy,
   FileText,
   Globe,
   Hourglass,
@@ -22,6 +23,7 @@ import { Badge, Button, Input, Panel, Spinner, Textarea } from "@/components/ui/
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   buildM3U,
+  classifyChannels,
   isValidHttpUrl,
   parseM3U,
   parseUrlList,
@@ -264,10 +266,19 @@ function Dashboard() {
   const ingest = useCallback((text: string, label: string) => {
     const parsed = parseM3U(text);
     const errors = parsed.issues.filter((i) => i.severity === "error").length;
+    const { live, movies: parsedMovies, series: parsedSeries } = classifyChannels(parsed.channels);
     setChannels((prev) => {
       const seen = new Set(prev.map((c) => c.url));
-      const fresh = parsed.channels.filter((c) => !seen.has(c.url));
+      const fresh = live.filter((c) => !seen.has(c.url));
       return [...prev, ...fresh.map((c, i) => ({ ...c, id: `${label}-${prev.length + i}` }))];
+    });
+    setMovies((prev) => {
+      const seen = new Set(prev.map((m) => m.url));
+      return [...prev, ...parsedMovies.filter((m) => !seen.has(m.url))];
+    });
+    setSeries((prev) => {
+      const seen = new Set(prev.map((s) => s.name.toLowerCase()));
+      return [...prev, ...parsedSeries.filter((s) => !seen.has(s.name.toLowerCase()))];
     });
     setIssues((prev) => [
       ...prev,
@@ -1261,15 +1272,25 @@ function Dashboard() {
                               {r?.detail ?? (r?.httpStatus ? `HTTP ${r.httpStatus}` : "—")}
                             </td>
                             <td className="px-3 py-2 text-right">
-                              <Button
-                                size="sm"
-                                variant={playing?.url === c.url ? "primary" : "secondary"}
-                                aria-label={`Play ${c.name}`}
-                                onClick={() => setPlaying(c)}
-                              >
-                                <PlayCircle className="size-4" />
-                                Play
-                              </Button>
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  aria-label={`Copy ${c.name}`}
+                                  onClick={() => void copyM3U(c.name, buildM3U([c]))}
+                                >
+                                  <Copy className="size-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={playing?.url === c.url ? "primary" : "secondary"}
+                                  aria-label={`Play ${c.name}`}
+                                  onClick={() => setPlaying(c)}
+                                >
+                                  <PlayCircle className="size-4" />
+                                  Play
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         );
