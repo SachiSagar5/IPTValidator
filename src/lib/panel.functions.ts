@@ -45,9 +45,59 @@ async function fetchText(url: URL, timeoutMs = 20_000): Promise<string> {
       headers: { "user-agent": "VLC/3.0.20 LibVLC/3.0.20", accept: "*/*" },
     }),
   );
-  if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`Server returned ${statusLabel(res)} — ${responseErrorDetail(await res.text())}`);
+  }
   const text = (await res.text()).slice(0, MAX_BYTES);
   return text;
+}
+
+function truncate(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+function firstErrorMessage(parsed: unknown): string | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const rec = parsed as Record<string, unknown>;
+  for (const key of ["error", "message", "msg"]) {
+    const v = rec[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v && typeof v === "object") {
+      const nested = firstErrorMessage(v);
+      if (nested) return nested;
+    }
+  }
+  for (const key of ["js", "data"]) {
+    const v = rec[key];
+    if (v && typeof v === "object") {
+      const nested = firstErrorMessage(v);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+function responseErrorDetail(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "empty response";
+  try {
+    const msg = firstErrorMessage(JSON.parse(trimmed));
+    return msg ?? truncate(trimmed, 300);
+  } catch {
+    // Not JSON — strip HTML down to readable text.
+    const stripped = trimmed
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return truncate(stripped || trimmed, 300);
+  }
+}
+
+function statusLabel(res: Response): string {
+  return res.statusText ? `${res.status} ${res.statusText}` : String(res.status);
 }
 
 async function fetchJson<T = unknown>(url: URL, headers?: Record<string, string>): Promise<T> {
@@ -62,8 +112,16 @@ async function fetchJson<T = unknown>(url: URL, headers?: Record<string, string>
       },
     }),
   );
-  if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-  return (await res.json()) as T;
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Server returned ${statusLabel(res)} — ${responseErrorDetail(text)}`);
+  }
+  if (!text.trim()) throw new Error("Server returned an empty body.");
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Server returned a non-JSON response — ${responseErrorDetail(text)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -271,13 +329,8 @@ export const checkXtreamAccount = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
-// Stalker Portal / Ministra API
+// Stalker Portal API — wire format ported from iptvnator
 // ---------------------------------------------------------------------------
-
-type StalkerTokenResponse = {
-  jwt?: string;
-  js?: { token?: string; expires?: number };
-};
 
 type StalkerChannel = {
   id?: number;
@@ -319,8 +372,349 @@ function buildStalkerM3u(channels: StalkerChannel[], categoryMap: Map<string, st
   return lines.join("\n") + "\n";
 }
 
+export type StalkerIdentityInput = {
+  serialNumber?: string;
+  deviceId1?: string;
+  deviceId2?: string;
+};
+
+// ---------------------------------------------------------------------------
+// Stalker wire-format helpers (ported from iptvnator)
+// ---------------------------------------------------------------------------
+
+const STALKER_MAG_USER_AGENT =
+  "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250";
+
+const STALKER_STB_PROFILE_PARAMS: Record<string, string> = {
+  ver: "ImageDescription: 0.2.18-r23-250; ImageDate: Wed Oct 21 11:10:12 EEST 2020; PORTAL version: 5.6.2; API Version: JS API version: 343; STB API version: 146; Player Engine version: 0x58c",
+  stb_type: "MAG250",
+  hw_version: "1.7-BD-00",
+  image_version: "218",
+  client_type: "STB",
+  num_banks: "2",
+  video_out: "hdmi",
+  hd: "1",
+};
+
+const STALKER_LEGACY_SERIAL = "BEDACD4569BAF";
+const STALKER_CFDUID_SUFFIX = "e030245495acd6ebfc1";
+
+function normalizeStalkerSerial(value: string | undefined): string | undefined {
+  const serial = (value ?? "").trim();
+  if (!serial) return undefined;
+  if (serial.toUpperCase() === STALKER_LEGACY_SERIAL) return undefined;
+  return serial;
+}
+
+type StalkerIdentity = {
+  serial: string;
+  deviceId1: string;
+  deviceId2: string;
+};
+
+function normalizeStalkerIdentity(id: StalkerIdentityInput | undefined): StalkerIdentity {
+  return {
+    serial: normalizeStalkerSerial(id?.serialNumber) ?? "",
+    deviceId1: (id?.deviceId1 ?? "").trim(),
+    deviceId2: (id?.deviceId2 ?? "").trim(),
+  };
+}
+
+function clean(value: string | undefined | null): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+// Device identity only — the auth token is appended by each caller.
+function stalkerIdentityHeaders(
+  id: StalkerIdentityInput | undefined,
+): Record<string, string> {
+  const identity = normalizeStalkerIdentity(id);
+  const headers: Record<string, string> = {};
+  if (identity.serial) headers["SN"] = identity.serial;
+  if (identity.deviceId1) headers["Device-Id"] = identity.deviceId1;
+  if (identity.deviceId2) headers["Device-Id-2"] = identity.deviceId2;
+  return headers;
+}
+
+function buildStalkerSerialCfduid(serial: string): string {
+  return serial
+    .toLowerCase()
+    .replace(/[^a-f0-9]/g, "")
+    .concat(STALKER_CFDUID_SUFFIX)
+    .slice(0, 32)
+    .padEnd(32, "0");
+}
+
+function buildStalkerCookie(mac: string, serial: string): string {
+  const parts = [`mac=${mac}`, "stb_lang=en_US@rg=dezzzz", "timezone=Europe/Berlin"];
+  if (serial) parts.push(`__cfduid=${buildStalkerSerialCfduid(serial)}`);
+  return parts.join("; ");
+}
+
+function buildStalkerHeaders(
+  mac: string,
+  identity: StalkerIdentity,
+  token: string,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    Cookie: buildStalkerCookie(mac, identity.serial),
+    "User-Agent": STALKER_MAG_USER_AGENT,
+    "X-User-Agent": STALKER_MAG_USER_AGENT,
+    Accept: "*/*",
+    Connection: "keep-alive",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+  if (identity.serial) headers["SN"] = identity.serial;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
+function stalkerRandom(): string {
+  return Math.random().toString(16).slice(2, 10).toUpperCase();
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function normalizeStalkerServerUrl(server: string): string {
+  let raw = server.trim();
+  if (!/^https?:\/\//i.test(raw)) raw = "http://" + raw;
+  const url = new URL(raw);
+  url.search = "";
+  url.hash = "";
+  const pathname = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${pathname}`;
+}
+
+function addStalkerCandidatePaths(candidates: Set<string>, origin: string, dir: string): void {
+  const root = dir === "/" ? "" : dir;
+  candidates.add(`${origin}${root}/portal.php`);
+  candidates.add(`${origin}${root}/server/load.php`);
+  if (!root.endsWith("/stalker_portal")) {
+    candidates.add(`${origin}${root}/stalker_portal/server/load.php`);
+  }
+}
+
+function buildStalkerEndpointCandidates(server: string): string[] {
+  let raw = server.trim();
+  if (!/^https?:\/\//i.test(raw)) raw = "http://" + raw;
+  const base = assertPublicHttpUrl(raw);
+  base.search = "";
+  base.hash = "";
+  const pathname = base.pathname.replace(/\/+$/, "");
+  const candidates = new Set<string>();
+
+  if (/\.php$/i.test(pathname)) {
+    candidates.add(`${base.origin}${pathname}`);
+    const parent = pathname.slice(0, pathname.lastIndexOf("/")) || "/";
+    addStalkerCandidatePaths(candidates, base.origin, parent);
+  } else {
+    const segments = pathname.split("/").filter(Boolean);
+    const last = segments[segments.length - 1];
+    if (last && last.toLowerCase() === "c") segments.pop();
+    const dir = segments.length === 0 ? "/" : "/" + segments.join("/");
+    addStalkerCandidatePaths(candidates, base.origin, dir);
+  }
+  return [...candidates];
+}
+
+// CMD values arrive pre-encoded from portals; encodeURIComponent would double-encode
+// every "://" and "?" in a stream URL, so each byte is escaped individually.
+const STALKER_SAFE_CMD_CHAR = /^[A-Za-z0-9\-_.~!*()/:?@$,+=[\]%]$/;
+
+function encodeStalkerCmdValue(value: string): string {
+  let out = "";
+  for (const byte of new TextEncoder().encode(value)) {
+    const ch = String.fromCharCode(byte);
+    out += STALKER_SAFE_CMD_CHAR.test(ch)
+      ? ch
+      : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return out;
+}
+
+function buildStalkerRequestUrl(
+  endpoint: string,
+  params: Record<string, string | number | undefined>,
+): string {
+  const url = new URL(endpoint);
+  const entries: [string, string][] = [];
+  let hasJsWrapper = false;
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    const str = String(value);
+    if (key === "JsHttpRequest") hasJsWrapper = true;
+    entries.push([key, key === "cmd" ? encodeStalkerCmdValue(str) : encodeURIComponent(str)]);
+  }
+  if (!hasJsWrapper) entries.push(["JsHttpRequest", "1-xml"]);
+  const query = entries.map(([k, v]) => `${encodeURIComponent(k)}=${v}`).join("&");
+  return `${url.origin}${url.pathname}${query ? `?${query}` : ""}`;
+}
+
+const STALKER_AUTH_FAILURE_TEXT = [
+  /^authorization failed[.!]*(?:\s*\d+)?$/i,
+  /^access denied[.!]*$/i,
+  /^unauthorized request[.!]*$/i,
+];
+
+const STALKER_AUTH_FAILURE_PHRASES = [
+  /authorization\s+failed/i,
+  /access\s+denied/i,
+  /unauthorized\s+request/i,
+  /auth\s+failed/i,
+  /invalid\s+token/i,
+  /\bunauthorized\b/i,
+  /authorization/i,
+];
+
+function isStalkerAuthFailureBody(body: string): boolean {
+  const text = body.trim();
+  if (!text) return false;
+  if (text.length <= 64) {
+    for (const re of STALKER_AUTH_FAILURE_TEXT) if (re.test(text)) return true;
+  }
+  if (text.length <= 200) {
+    for (const re of STALKER_AUTH_FAILURE_PHRASES) if (re.test(text)) return true;
+  }
+  return false;
+}
+
+function stalkerErrorText(status: number, body: string): string {
+  const text = body.trim();
+  if (!text) return `HTTP ${status}`;
+  return truncate(text, 300);
+}
+
+type StalkerRequestResult = {
+  status: number;
+  ok: boolean;
+  body: string;
+};
+
+async function stalkerRequest(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = 15_000,
+): Promise<StalkerRequestResult> {
+  const target = assertPublicHttpUrl(url);
+  return withTimeout(timeoutMs, async (signal) => {
+    const res = await fetch(target, { method: "GET", headers, redirect: "follow", signal });
+    const body = await res.text();
+    return { status: res.status, ok: res.ok, body };
+  });
+}
+
+function isStalkerFatalNetworkError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (code === "ECONNREFUSED" || code === "ENOTFOUND") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+type StalkerProbeKind = "auth-required" | "data" | "not-a-portal";
+
+function classifyStalkerProbe(result: StalkerRequestResult): StalkerProbeKind {
+  if (result.status === 401 || result.status === 403) return "auth-required";
+  const body = result.body.trim();
+  if (!body) return "not-a-portal";
+  if (isStalkerAuthFailureBody(body)) return "auth-required";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return "not-a-portal";
+  }
+  if (!parsed || typeof parsed !== "object") return "not-a-portal";
+  const js = (parsed as { js?: unknown }).js;
+  if (Array.isArray(js)) return "data";
+  if (js && typeof js === "object") {
+    const obj = js as { data?: unknown; error?: unknown; msg?: unknown };
+    if (obj.error || obj.msg) return "not-a-portal";
+    if (Array.isArray(obj.data)) return "data";
+  }
+  return "not-a-portal";
+}
+
+const stalkerEndpointCache = new Map<string, string>();
+
+async function resolveStalkerEndpoint(server: string, mac: string): Promise<string> {
+  const normalized = normalizeStalkerServerUrl(server);
+  assertPublicHttpUrl(normalized);
+  const cached = stalkerEndpointCache.get(normalized);
+  if (cached) return cached;
+
+  const candidates = buildStalkerEndpointCandidates(server);
+  const headers = buildStalkerHeaders(mac, { serial: "", deviceId1: "", deviceId2: "" }, "");
+  const probed: string[] = [];
+
+  for (const endpoint of candidates) {
+    probed.push(endpoint);
+    try {
+      const url = buildStalkerRequestUrl(endpoint, { type: "itv", action: "get_genres" });
+      const result = await stalkerRequest(url, headers, 12_000);
+      const kind = classifyStalkerProbe(result);
+      if (kind === "auth-required" || kind === "data") {
+        stalkerEndpointCache.set(normalized, endpoint);
+        return endpoint;
+      }
+    } catch (error) {
+      if (isStalkerFatalNetworkError(error)) {
+        const detail = firstErrorMessage(error);
+        throw new Error(`Could not reach ${normalized} — ${detail}`);
+      }
+    }
+  }
+
+  throw new Error(
+    `No Stalker portal answered at ${normalized}. Probed: ${probed.join(", ")}`,
+  );
+}
+
+type StalkerApiResponse = {
+  status: number;
+  ok: boolean;
+  body: string;
+  json?: unknown;
+};
+
+type StalkerTokenResponse = StalkerApiResponse & {
+  jwt?: string;
+  js?: { token?: string };
+};
+
+async function stalkerApiGet(
+  endpoint: string,
+  headers: Record<string, string>,
+  params: Record<string, string | number | undefined>,
+): Promise<StalkerApiResponse> {
+  const url = buildStalkerRequestUrl(endpoint, params);
+  const result = await stalkerRequest(url, headers);
+  const text = result.body.trim();
+  let json: unknown;
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = undefined;
+    }
+  }
+  return {
+    status: result.status,
+    ok: result.ok,
+    body: result.body,
+    ...(json === undefined ? {} : { json }),
+  };
+}
+
 export const loginStalker = createServerFn({ method: "POST" })
-  .validator((data: { server: string; mac: string }) => {
+  .validator((data: { server: string; mac: string } & StalkerIdentityInput) => {
     if (!data.server || !data.mac) {
       throw new Error("Server URL and MAC address are required.");
     }
@@ -328,10 +722,17 @@ export const loginStalker = createServerFn({ method: "POST" })
     if (!/^https?:\/\//i.test(base)) base = "http://" + base;
     const url = new URL(base);
     const mac = data.mac.trim().replace(/-/g, ":").toUpperCase();
-    return { server: url.origin, mac };
+    return {
+      server: url.origin,
+      mac,
+      serialNumber: clean(data.serialNumber),
+      deviceId1: clean(data.deviceId1),
+      deviceId2: clean(data.deviceId2),
+    };
   })
   .handler(async ({ data }) => {
     const { server, mac } = data;
+    const identity = stalkerIdentityHeaders(data);
 
     // 1. Get token
     const tokenUrl = new URL(`${server}/stalker_portal/server/api.php`);
@@ -339,12 +740,21 @@ export const loginStalker = createServerFn({ method: "POST" })
     tokenUrl.searchParams.set("action", "handshake");
     const tokenResp = await fetchJson<StalkerTokenResponse>(tokenUrl, {
       Mac: mac,
+      ...identity,
     });
     const token = tokenResp.jwt || tokenResp.js?.token;
-    if (!token) throw new Error("Could not authenticate — check server and MAC address.");
+    if (!token) {
+      const detail = firstErrorMessage(tokenResp);
+      throw new Error(
+        detail
+          ? `Could not authenticate — ${detail}`
+          : "Could not authenticate — check server and MAC address.",
+      );
+    }
 
     const authHeaders: Record<string, string> = {
       Mac: mac,
+      ...identity,
       Authorization: `Bearer ${token}`,
     };
 
@@ -370,6 +780,7 @@ export const loginStalker = createServerFn({ method: "POST" })
     chUrl.searchParams.set("p", "1");
     chUrl.searchParams.set("c", "5000");
     let channels: StalkerChannel[] = [];
+    let channelError: string | null = null;
     try {
       const resp = await fetchJson<{ js?: { data?: StalkerChannel[] } } | StalkerChannel[]>(
         chUrl,
@@ -380,12 +791,16 @@ export const loginStalker = createServerFn({ method: "POST" })
       } else if (resp && typeof resp === "object" && "js" in resp && resp.js?.data) {
         channels = resp.js.data;
       }
-    } catch {
-      // empty
+    } catch (e) {
+      channelError = e instanceof Error ? e.message : String(e);
     }
 
     if (!channels.length) {
-      throw new Error("No channels found — check your MAC address and server.");
+      throw new Error(
+        channelError
+          ? `Channel list failed — ${channelError}`
+          : "No channels found — check your MAC address and server.",
+      );
     }
 
     const text = buildStalkerM3u(channels, categoryMap);
@@ -450,15 +865,29 @@ function groupName(genreIds: unknown, map: Map<string, string>): string | undefi
 
 type StalkerSession = { token: string; headers: Record<string, string> };
 
-async function stalkerAuth(server: string, mac: string): Promise<StalkerSession> {
+async function stalkerAuth(
+  server: string,
+  mac: string,
+  identity: StalkerIdentityInput = {},
+): Promise<StalkerSession> {
+  const identityHeaders = stalkerIdentityHeaders(identity);
   const handshakeUrl = new URL(`${server}/stalker_portal/server/api.php`);
   handshakeUrl.searchParams.set("type", "stb");
   handshakeUrl.searchParams.set("action", "handshake");
-  const tokenResp = await fetchJson<StalkerTokenResponse>(handshakeUrl, { Mac: mac });
+  const tokenResp = await fetchJson<StalkerTokenResponse>(handshakeUrl, {
+    Mac: mac,
+    ...identityHeaders,
+  });
   const token = tokenResp.jwt || tokenResp.js?.token;
-  if (!token) throw new Error("Stalker authentication failed.");
+  if (!token) {
+    const detail = firstErrorMessage(tokenResp);
+    throw new Error(
+      detail ? `Stalker authentication failed — ${detail}` : "Stalker authentication failed.",
+    );
+  }
   const headers: Record<string, string> = {
     Mac: mac,
+    ...identityHeaders,
     Authorization: `Bearer ${token}`,
   };
   // Some portals require a profile call to finish authorisation.
@@ -666,15 +1095,21 @@ export const fetchXtreamSeriesEpisodes = createServerFn({ method: "POST" })
   });
 
 export const fetchStalkerVod = createServerFn({ method: "POST" })
-  .validator((data: { server: string; mac: string }) => {
+  .validator((data: { server: string; mac: string } & StalkerIdentityInput) => {
     if (!data.server || !data.mac) throw new Error("Server URL and MAC address are required.");
     let base = data.server.trim();
     if (!/^https?:\/\//i.test(base)) base = "http://" + base;
-    return { server: new URL(base).origin, mac: data.mac.trim().replace(/-/g, ":").toUpperCase() };
+    return {
+      server: new URL(base).origin,
+      mac: data.mac.trim().replace(/-/g, ":").toUpperCase(),
+      serialNumber: clean(data.serialNumber),
+      deviceId1: clean(data.deviceId1),
+      deviceId2: clean(data.deviceId2),
+    };
   })
   .handler(async ({ data }) => {
     const { server, mac } = data;
-    const { headers } = await stalkerAuth(server, mac);
+    const { headers } = await stalkerAuth(server, mac, data);
 
     const movies: VodItem[] = [];
     const series: SeriesItem[] = [];

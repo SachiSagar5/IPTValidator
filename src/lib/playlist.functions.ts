@@ -20,6 +20,9 @@ export const savePlaylist = createServerFn({ method: "POST" })
       username?: string;
       password?: string;
       mac?: string;
+      serialNumber?: string;
+      deviceId1?: string;
+      deviceId2?: string;
     }) => {
       if (!data || !Array.isArray(data.channels) || data.channels.length === 0) {
         throw new Error("A channel list is required.");
@@ -34,6 +37,9 @@ export const savePlaylist = createServerFn({ method: "POST" })
         username: typeof data.username === "string" ? data.username : undefined,
         password: typeof data.password === "string" ? data.password : undefined,
         mac: typeof data.mac === "string" ? data.mac : undefined,
+        serialNumber: typeof data.serialNumber === "string" ? data.serialNumber : undefined,
+        deviceId1: typeof data.deviceId1 === "string" ? data.deviceId1 : undefined,
+        deviceId2: typeof data.deviceId2 === "string" ? data.deviceId2 : undefined,
       };
     },
   )
@@ -44,6 +50,9 @@ export const savePlaylist = createServerFn({ method: "POST" })
       ...(data.username ? { username: data.username } : {}),
       ...(data.password ? { password: data.password } : {}),
       ...(data.mac ? { mac: data.mac } : {}),
+      ...(data.serialNumber ? { serialNumber: data.serialNumber } : {}),
+      ...(data.deviceId1 ? { deviceId1: data.deviceId1 } : {}),
+      ...(data.deviceId2 ? { deviceId2: data.deviceId2 } : {}),
     }),
   );
 

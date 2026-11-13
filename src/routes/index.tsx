@@ -81,7 +81,14 @@ type Mode = "quick" | "deep";
 
 type ProviderCreds =
   | { type: "xtream"; server: string; username: string; password: string }
-  | { type: "stalker"; server: string; mac: string };
+  | {
+      type: "stalker";
+      server: string;
+      mac: string;
+      serialNumber?: string;
+      deviceId1?: string;
+      deviceId2?: string;
+    };
 
 function providerMeta(creds: ProviderCreds): Record<string, string> {
   if (creds.type === "xtream") {
@@ -96,6 +103,9 @@ function providerMeta(creds: ProviderCreds): Record<string, string> {
     provider: "stalker",
     server: creds.server,
     mac: creds.mac,
+    ...(creds.serialNumber ? { serialNumber: creds.serialNumber } : {}),
+    ...(creds.deviceId1 ? { deviceId1: creds.deviceId1 } : {}),
+    ...(creds.deviceId2 ? { deviceId2: creds.deviceId2 } : {}),
   };
 }
 type StatusFilter = "all" | "ok" | "dead" | "expired" | "unchecked";
@@ -147,6 +157,9 @@ function Dashboard() {
   const [xtreamPass, setXtreamPass] = useState("");
   const [stalkerServer, setStalkerServer] = useState("");
   const [stalkerMac, setStalkerMac] = useState("");
+  const [stalkerSerial, setStalkerSerial] = useState("");
+  const [stalkerDeviceId1, setStalkerDeviceId1] = useState("");
+  const [stalkerDeviceId2, setStalkerDeviceId2] = useState("");
   const [movies, setMovies] = useState<VodItem[]>([]);
   const [series, setSeries] = useState<SeriesItem[]>([]);
   const [providerCreds, setProviderCreds] = useState<ProviderCreds | null>(null);
@@ -407,10 +420,31 @@ function Dashboard() {
     void runXtream(xtreamServer, xtreamUser, xtreamPass, false);
   }
 
-  async function runStalker(server: string, mac: string, replace: boolean) {
+  async function runStalker(
+    server: string,
+    mac: string,
+    replace: boolean,
+    identity?: { serialNumber?: string; deviceId1?: string; deviceId2?: string },
+  ) {
     setBusy(true);
+    const serialNumber = (identity?.serialNumber ?? "").trim();
+    const deviceId1 = (identity?.deviceId1 ?? "").trim();
+    const deviceId2 = (identity?.deviceId2 ?? "").trim();
+    const cleanIdentity = {
+      ...(serialNumber ? { serialNumber } : {}),
+      ...(deviceId1 ? { deviceId1 } : {}),
+      ...(deviceId2 ? { deviceId2 } : {}),
+    };
     try {
-      const res = await stalkerLogin({ data: { server, mac } });
+      const res = await stalkerLogin({
+        data: {
+          server,
+          mac,
+          serialNumber,
+          deviceId1,
+          deviceId2,
+        },
+      });
       const parsed = parseM3U(res.text);
       const parsedChannels = parsed.channels.map((c, i) => ({ ...c, id: `stalker-${i}` }));
       setChannels((prev) => {
@@ -426,10 +460,23 @@ function Dashboard() {
         errors,
       };
       setSources((prev) => (replace ? [source] : [...prev, source]));
-      setProviderCreds({ type: "stalker", server: res.finalUrl, mac });
+      setProviderCreds({
+        type: "stalker",
+        server: res.finalUrl,
+        mac,
+        ...cleanIdentity,
+      });
       notify("ok", `Loaded ${res.count} channels from Stalker Portal.`);
       try {
-        const vod = await stalkerVod({ data: { server, mac } });
+        const vod = await stalkerVod({
+          data: {
+            server,
+            mac,
+            serialNumber,
+            deviceId1,
+            deviceId2,
+          },
+        });
         setMovies(vod.movies);
         setSeries(vod.series);
       } catch {
@@ -447,7 +494,11 @@ function Dashboard() {
       notify("error", "Server URL and MAC address are required.");
       return;
     }
-    void runStalker(stalkerServer, stalkerMac, false);
+    void runStalker(stalkerServer, stalkerMac, false, {
+      serialNumber: stalkerSerial,
+      deviceId1: stalkerDeviceId1,
+      deviceId2: stalkerDeviceId2,
+    });
   }
 
   const loadSeriesEpisodes = useCallback(
@@ -737,7 +788,14 @@ function Dashboard() {
             password: p.password,
           } as const)
         : p.provider === "stalker" && p.server && p.mac
-          ? ({ type: "stalker", server: p.server, mac: p.mac } as const)
+          ? ({
+              type: "stalker",
+              server: p.server,
+              mac: p.mac,
+              ...(p.serialNumber ? { serialNumber: p.serialNumber } : {}),
+              ...(p.deviceId1 ? { deviceId1: p.deviceId1 } : {}),
+              ...(p.deviceId2 ? { deviceId2: p.deviceId2 } : {}),
+            } as const)
           : null;
 
     if (creds) {
@@ -752,6 +810,9 @@ function Dashboard() {
         setSourceTab("stalker");
         setStalkerServer(creds.server);
         setStalkerMac(creds.mac);
+        setStalkerSerial(creds.serialNumber ?? "");
+        setStalkerDeviceId1(creds.deviceId1 ?? "");
+        setStalkerDeviceId2(creds.deviceId2 ?? "");
       }
       scrollToSources();
       notify(
@@ -761,7 +822,16 @@ function Dashboard() {
       if (creds.type === "xtream") {
         void runXtream(creds.server, creds.username, creds.password, true);
       } else {
-        void runStalker(creds.server, creds.mac, true);
+        void runStalker(
+          creds.server,
+          creds.mac,
+          true,
+          {
+            ...(creds.serialNumber ? { serialNumber: creds.serialNumber } : {}),
+            ...(creds.deviceId1 ? { deviceId1: creds.deviceId1 } : {}),
+            ...(creds.deviceId2 ? { deviceId2: creds.deviceId2 } : {}),
+          },
+        );
       }
       return;
     }
@@ -974,6 +1044,21 @@ function Dashboard() {
                       value={stalkerMac}
                       onChange={(e) => setStalkerMac(e.target.value)}
                       placeholder="00:1A:79:XX:XX:XX"
+                    />
+                    <Input
+                      value={stalkerSerial}
+                      onChange={(e) => setStalkerSerial(e.target.value)}
+                      placeholder="Serial number (optional)"
+                    />
+                    <Input
+                      value={stalkerDeviceId1}
+                      onChange={(e) => setStalkerDeviceId1(e.target.value)}
+                      placeholder="Device ID 1 (optional)"
+                    />
+                    <Input
+                      value={stalkerDeviceId2}
+                      onChange={(e) => setStalkerDeviceId2(e.target.value)}
+                      placeholder="Device ID 2 (optional)"
                     />
                     <Button
                       variant="primary"

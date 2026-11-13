@@ -1,4 +1,4 @@
-import { createClient } from "@libsql/client";
+import type { Client } from "@libsql/client";
 
 import type { Channel } from "./m3u";
 
@@ -13,6 +13,9 @@ export type DbPlaylist = {
   username?: string;
   password?: string;
   mac?: string;
+  serialNumber?: string;
+  deviceId1?: string;
+  deviceId2?: string;
 };
 
 export type DbDraft = {
@@ -34,6 +37,9 @@ type PlaylistRow = {
   username: string | null;
   password: string | null;
   mac: string | null;
+  serialNumber: string | null;
+  deviceId1: string | null;
+  deviceId2: string | null;
 };
 
 type DraftRow = {
@@ -44,41 +50,78 @@ type DraftRow = {
   updatedAt: number;
 };
 
-let client: ReturnType<typeof createClient> | null = null;
-let initPromise: Promise<ReturnType<typeof createClient>> | null = null;
+let client: Client | null = null;
+let initPromise: Promise<Client> | null = null;
+
+/**
+ * Opens a LibSQL client on the right transport.
+ *
+ * `@libsql/client` (the default entry) resolves to the native Node binding and
+ * pulls in a platform-specific `.node` file. On Vercel that binding is built on
+ * the deployment machine's architecture, so a bundle produced on darwin-arm64
+ * crashes with ERR_DLOPEN_FAILED when it lands on linux-x64. The `/web` entry is
+ * pure fetch + WebSocket with no native dependency, and `expandConfig` inside
+ * `@libsql/core` already normalizes `libsql://` to `https://`/`wss://`, so the
+ * Turso URL works unchanged. The native entry stays for the local `file:` path,
+ * where `/web` cannot help.
+ *
+ * The native specifier is assembled at runtime rather than written as a literal.
+ * Nitro's dependency tracer follows literal dynamic-import specifiers, so a
+ * literal `"@libsql/client"` causes the darwin-arm64 `.node` binary to be copied
+ * into the linux function bundle — where it can never load. Rollup cannot
+ * statically resolve a computed specifier, so the native package stays out of
+ * the deployment entirely while still resolving at runtime in local dev.
+ */
+const NATIVE_ENTRY = ["@libsql", "client"].join("/");
+
+async function openClient(url: string, authToken?: string): Promise<Client> {
+  const config = { url, ...(authToken ? { authToken } : {}) };
+  if (url.startsWith("file:")) {
+    const native = (await import(/* @vite-ignore */ NATIVE_ENTRY)) as typeof import("@libsql/client");
+    return native.createClient(config);
+  }
+  const { createClient } = await import("@libsql/client/web");
+  return createClient(config);
+}
 
 /** Lazily creates the LibSQL client, ensures the schema exists and migrates legacy db.json. */
-function getClient() {
+function getClient(): Promise<Client> {
   if (client) return Promise.resolve(client);
   if (initPromise) return initPromise;
 
-  initPromise = (async () => {
+  const init = async (): Promise<Client> => {
     const url = process.env["TURSO_DATABASE_URL"];
     const authToken = process.env["TURSO_AUTH_TOKEN"];
+    const resolved = url ?? "file:./db.db";
 
-    if (url) {
-      client = createClient({
-        url,
-        ...(authToken ? { authToken } : {}),
-      });
-    } else {
+    if (!url) {
       console.warn(
         "[db] TURSO_DATABASE_URL not set. Falling back to local file:./db.db — data will NOT persist on serverless hosting.",
       );
-      client = createClient({ url: "file:./db.db" });
     }
 
-    await bootstrapSchema();
-    await migrateFromJson();
-    return client;
-  })();
+    const opened = await openClient(resolved, authToken);
+    await bootstrapSchema(opened);
+    await migrateFromJson(opened);
+    client = opened;
+    return opened;
+  };
+
+  // A rejected promise would poison the module for the life of the function
+  // instance, so a failed init clears itself and the next call retries.
+  initPromise = init().catch((error) => {
+    initPromise = null;
+    client = null;
+    console.error("[db] initialisation failed:", error);
+    throw error;
+  });
 
   return initPromise;
 }
 
-async function bootstrapSchema(): Promise<void> {
-  if (!client) return;
-  await client.execute(`
+async function bootstrapSchema(db: Client): Promise<void> {
+  try {
+    await db.execute(`
     CREATE TABLE IF NOT EXISTS playlists (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -89,10 +132,13 @@ async function bootstrapSchema(): Promise<void> {
       server TEXT,
       username TEXT,
       password TEXT,
-      mac TEXT
+      mac TEXT,
+      serialNumber TEXT,
+      deviceId1 TEXT,
+      deviceId2 TEXT
     )
   `);
-  await client.execute(`
+    await db.execute(`
     CREATE TABLE IF NOT EXISTS drafts (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -101,23 +147,40 @@ async function bootstrapSchema(): Promise<void> {
       updatedAt INTEGER NOT NULL
     )
   `);
+  } catch (error) {
+    // Schema creation is fatal for writes but not for reads — callers degrade to
+    // an empty list rather than taking the whole SSR render down with them.
+    console.error("[db] schema bootstrap failed:", error);
+    throw error;
+  }
+
+  // Databases created before the stalker identity fields exist lack these columns.
+  for (const column of ["serialNumber", "deviceId1", "deviceId2"]) {
+    try {
+      await db.execute(`ALTER TABLE playlists ADD COLUMN ${column} TEXT`);
+    } catch {
+      // column already exists — nothing to do
+    }
+  }
 }
 
 /** One-time import of the legacy db.json file once the SQLite tables are empty. */
-async function migrateFromJson(): Promise<void> {
-  if (!client) return;
+async function migrateFromJson(db: Client): Promise<void> {
+  // Legacy import is a local-dev convenience only. Skipping it on Vercel keeps
+  // node:fs out of the serverless path entirely.
+  if (process.env["VERCEL"] && process.env["IMPORT_DB_JSON"] !== "1") return;
   try {
-    const count = await client.execute("SELECT COUNT(*) as n FROM playlists");
+    const count = await db.execute("SELECT COUNT(*) as n FROM playlists");
     const total = Number(count.rows[0]?.["n"] ?? 0);
     if (total > 0) return;
     const fs = await import("node:fs/promises");
     const raw = await fs.readFile(`${process.cwd()}/db.json`, "utf8");
     const parsed = JSON.parse(raw) as { playlists?: DbPlaylist[]; drafts?: DbDraft[] };
     for (const p of parsed.playlists ?? []) {
-      await client.execute({
+      await db.execute({
         sql: `INSERT OR IGNORE INTO playlists
-          (id, name, createdAt, channels, source, provider, server, username, password, mac)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, name, createdAt, channels, source, provider, server, username, password, mac, serialNumber, deviceId1, deviceId2)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           p.id,
           p.name,
@@ -129,11 +192,14 @@ async function migrateFromJson(): Promise<void> {
           p.username ?? null,
           p.password ?? null,
           p.mac ?? null,
+          p.serialNumber ?? null,
+          p.deviceId1 ?? null,
+          p.deviceId2 ?? null,
         ],
       });
     }
     for (const d of parsed.drafts ?? []) {
-      await client.execute({
+      await db.execute({
         sql: `INSERT OR IGNORE INTO drafts (id, name, content, createdAt, updatedAt)
           VALUES (?, ?, ?, ?, ?)`,
         args: [d.id, d.name, d.content, d.createdAt, d.updatedAt],
@@ -166,6 +232,9 @@ function rowToPlaylist(row: PlaylistRow): DbPlaylist {
   if (row.username) playlist.username = row.username;
   if (row.password) playlist.password = row.password;
   if (row.mac) playlist.mac = row.mac;
+  if (row.serialNumber) playlist.serialNumber = row.serialNumber;
+  if (row.deviceId1) playlist.deviceId1 = row.deviceId1;
+  if (row.deviceId2) playlist.deviceId2 = row.deviceId2;
   return playlist;
 }
 
@@ -180,9 +249,16 @@ function rowToDraft(row: DraftRow): DbDraft {
 }
 
 export async function listAll(): Promise<DbPlaylist[]> {
-  const db = await getClient();
-  const result = await db.execute("SELECT * FROM playlists ORDER BY createdAt DESC");
-  return (result.rows as unknown as PlaylistRow[]).map(rowToPlaylist);
+  try {
+    const db = await getClient();
+    const result = await db.execute("SELECT * FROM playlists ORDER BY createdAt DESC");
+    return (result.rows as unknown as PlaylistRow[]).map(rowToPlaylist);
+  } catch (error) {
+    // A dead DB must not blank the whole UI — the page paints empty and the
+    // user sees a retryable state instead of the SSR error wall.
+    console.error("[db] listAll failed:", error);
+    return [];
+  }
 }
 
 export async function createPlaylist(
@@ -195,6 +271,9 @@ export async function createPlaylist(
     username?: string;
     password?: string;
     mac?: string;
+    serialNumber?: string;
+    deviceId1?: string;
+    deviceId2?: string;
   },
 ): Promise<DbPlaylist> {
   const db = await getClient();
@@ -209,11 +288,14 @@ export async function createPlaylist(
     ...(provider?.username ? { username: provider.username } : {}),
     ...(provider?.password ? { password: provider.password } : {}),
     ...(provider?.mac ? { mac: provider.mac } : {}),
+    ...(provider?.serialNumber ? { serialNumber: provider.serialNumber } : {}),
+    ...(provider?.deviceId1 ? { deviceId1: provider.deviceId1 } : {}),
+    ...(provider?.deviceId2 ? { deviceId2: provider.deviceId2 } : {}),
   };
   await db.execute({
     sql: `INSERT OR REPLACE INTO playlists
-      (id, name, createdAt, channels, source, provider, server, username, password, mac)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, createdAt, channels, source, provider, server, username, password, mac, serialNumber, deviceId1, deviceId2)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       entry.id,
       entry.name,
@@ -225,6 +307,9 @@ export async function createPlaylist(
       entry.username ?? null,
       entry.password ?? null,
       entry.mac ?? null,
+      entry.serialNumber ?? null,
+      entry.deviceId1 ?? null,
+      entry.deviceId2 ?? null,
     ],
   });
   return entry;
@@ -243,15 +328,20 @@ export async function renameEntry(id: string, name: string): Promise<void> {
   });
 }
 
-async function getPlaylistName(db: ReturnType<typeof createClient>, id: string): Promise<string> {
+async function getPlaylistName(db: Client, id: string): Promise<string> {
   const result = await db.execute({ sql: "SELECT name FROM playlists WHERE id = ?", args: [id] });
   return (result.rows[0]?.["name"] as string | undefined) ?? "Untitled playlist";
 }
 
 export async function listDraftEntries(): Promise<DbDraft[]> {
-  const db = await getClient();
-  const result = await db.execute("SELECT * FROM drafts ORDER BY updatedAt DESC");
-  return (result.rows as unknown as DraftRow[]).map(rowToDraft);
+  try {
+    const db = await getClient();
+    const result = await db.execute("SELECT * FROM drafts ORDER BY updatedAt DESC");
+    return (result.rows as unknown as DraftRow[]).map(rowToDraft);
+  } catch (error) {
+    console.error("[db] listDraftEntries failed:", error);
+    return [];
+  }
 }
 
 export async function upsertDraft(entry: {
