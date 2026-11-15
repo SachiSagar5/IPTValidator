@@ -1,4 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
+import {
+  browserHeaders,
+  cloudflareBlockMessage,
+  describeHttpFailure,
+  firstErrorMessage,
+  looksLikeCloudflare,
+  playerHeaders,
+  responseErrorDetail,
+  statusLabel,
+  truncate,
+} from "./http";
 
 const MAX_BYTES = 12_000_000;
 
@@ -38,88 +49,66 @@ async function withTimeout<T>(ms: number, fn: (signal: AbortSignal) => Promise<T
 }
 
 async function fetchText(url: URL, timeoutMs = 20_000): Promise<string> {
-  const res = await withTimeout(timeoutMs, (signal) =>
-    fetch(url.toString(), {
-      signal,
-      redirect: "follow",
-      headers: { "user-agent": "VLC/3.0.20 LibVLC/3.0.20", accept: "*/*" },
-    }),
-  );
-  if (!res.ok) {
-    throw new Error(`Server returned ${statusLabel(res)} — ${responseErrorDetail(await res.text())}`);
-  }
-  const text = (await res.text()).slice(0, MAX_BYTES);
-  return text;
-}
+  const request = (headers: Record<string, string>) =>
+    withTimeout(timeoutMs, (signal) =>
+      fetch(url.toString(), { signal, redirect: "follow", headers }),
+    );
 
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : s.slice(0, n - 1) + "…";
-}
+  let res = await request(playerHeaders());
+  let text = await res.text();
 
-function firstErrorMessage(parsed: unknown): string | null {
-  if (!parsed || typeof parsed !== "object") return null;
-  const rec = parsed as Record<string, unknown>;
-  for (const key of ["error", "message", "msg"]) {
-    const v = rec[key];
-    if (typeof v === "string" && v.trim()) return v.trim();
-    if (v && typeof v === "object") {
-      const nested = firstErrorMessage(v);
-      if (nested) return nested;
+  // Cloudflare sometimes rejects the VLC player agent but allows a browser
+  // agent through — retry once before giving up on a blocked/challenged page.
+  if (
+    !res.ok &&
+    looksLikeCloudflare(text) &&
+    !cloudflareBlockMessage(text)?.includes("taken offline")
+  ) {
+    const retry = await request(browserHeaders("*/*"));
+    const retryText = await retry.text();
+    if (retry.ok || !looksLikeCloudflare(retryText)) {
+      res = retry;
+      text = retryText;
     }
   }
-  for (const key of ["js", "data"]) {
-    const v = rec[key];
-    if (v && typeof v === "object") {
-      const nested = firstErrorMessage(v);
-      if (nested) return nested;
-    }
-  }
-  return null;
-}
 
-function responseErrorDetail(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "empty response";
-  try {
-    const msg = firstErrorMessage(JSON.parse(trimmed));
-    return msg ?? truncate(trimmed, 300);
-  } catch {
-    // Not JSON — strip HTML down to readable text.
-    const stripped = trimmed
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return truncate(stripped || trimmed, 300);
-  }
-}
-
-function statusLabel(res: Response): string {
-  return res.statusText ? `${res.status} ${res.statusText}` : String(res.status);
+  if (!res.ok) throw new Error(describeHttpFailure(res, text));
+  return text.slice(0, MAX_BYTES);
 }
 
 async function fetchJson<T = unknown>(url: URL, headers?: Record<string, string>): Promise<T> {
-  const res = await withTimeout(20_000, (signal) =>
-    fetch(url.toString(), {
-      signal,
-      redirect: "follow",
-      headers: {
-        "user-agent": "VLC/3.0.20 LibVLC/3.0.20",
-        accept: "application/json, */*",
-        ...headers,
-      },
-    }),
-  );
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Server returned ${statusLabel(res)} — ${responseErrorDetail(text)}`);
+  const request = (extra: Record<string, string>) =>
+    withTimeout(20_000, (signal) =>
+      fetch(url.toString(), {
+        signal,
+        redirect: "follow",
+        headers: { ...playerHeaders("application/json, */*"), ...extra },
+      }),
+    );
+
+  let res = await request(headers ?? {});
+  let text = await res.text();
+
+  if (
+    !res.ok &&
+    looksLikeCloudflare(text) &&
+    !cloudflareBlockMessage(text)?.includes("taken offline")
+  ) {
+    const retry = await request({ ...browserHeaders(), ...(headers ?? {}) });
+    const retryText = await retry.text();
+    if (retry.ok || !looksLikeCloudflare(retryText)) {
+      res = retry;
+      text = retryText;
+    }
   }
+
+  if (!res.ok) throw new Error(describeHttpFailure(res, text));
   if (!text.trim()) throw new Error("Server returned an empty body.");
   try {
     return JSON.parse(text) as T;
   } catch {
+    const block = cloudflareBlockMessage(text);
+    if (block) throw new Error(block);
     throw new Error(`Server returned a non-JSON response — ${responseErrorDetail(text)}`);
   }
 }
@@ -425,9 +414,7 @@ function clean(value: string | undefined | null): string {
 }
 
 // Device identity only — the auth token is appended by each caller.
-function stalkerIdentityHeaders(
-  id: StalkerIdentityInput | undefined,
-): Record<string, string> {
+function stalkerIdentityHeaders(id: StalkerIdentityInput | undefined): Record<string, string> {
   const identity = normalizeStalkerIdentity(id);
   const headers: Record<string, string> = {};
   if (identity.serial) headers["SN"] = identity.serial;
@@ -672,9 +659,7 @@ async function resolveStalkerEndpoint(server: string, mac: string): Promise<stri
     }
   }
 
-  throw new Error(
-    `No Stalker portal answered at ${normalized}. Probed: ${probed.join(", ")}`,
-  );
+  throw new Error(`No Stalker portal answered at ${normalized}. Probed: ${probed.join(", ")}`);
 }
 
 type StalkerApiResponse = {

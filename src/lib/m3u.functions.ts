@@ -1,4 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
+import {
+  browserHeaders,
+  cloudflareBlockMessage,
+  describeHttpFailure,
+  looksLikeCloudflare,
+  playerHeaders,
+} from "./http";
 
 const MAX_BYTES = 100_000_000;
 const MAX_BATCH = 120;
@@ -46,29 +53,48 @@ export const fetchPlaylist = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const url = assertPublicHttpUrl(data.url);
-    const res = await withTimeout(20_000, (signal) =>
-      fetch(url.toString(), {
-        signal,
-        redirect: "follow",
-        headers: { "user-agent": "VLC/3.0.20 LibVLC/3.0.20", accept: "*/*" },
-      }),
-    ).catch((e: unknown) => {
+    const request = (headers: Record<string, string>) =>
+      withTimeout(20_000, (signal) =>
+        fetch(url.toString(), { signal, redirect: "follow", headers }),
+      );
+
+    const res = await request(playerHeaders()).catch((e: unknown) => {
       throw new Error(
         `Could not reach that link (${e instanceof Error ? e.message : "network error"}).`,
       );
     });
 
-    if (!res.ok) throw new Error(`The link responded with status ${res.status}.`);
+    let finalRes = res;
+    let text = await res.text();
 
-    const len = Number(res.headers.get("content-length") ?? 0);
+    // Cloudflare sometimes blocks the VLC player agent but lets a browser agent
+    // through — retry once on a challenge page before reporting the failure.
+    if (
+      !res.ok &&
+      looksLikeCloudflare(text) &&
+      !cloudflareBlockMessage(text)?.includes("taken offline")
+    ) {
+      const retry = await request(browserHeaders("*/*")).catch(() => null);
+      if (retry) {
+        const retryText = await retry.text();
+        if (retry.ok || !looksLikeCloudflare(retryText)) {
+          finalRes = retry;
+          text = retryText;
+        }
+      }
+    }
+
+    if (!finalRes.ok) throw new Error(describeHttpFailure(finalRes, text));
+
+    const len = Number(finalRes.headers.get("content-length") ?? 0);
     if (len && len > MAX_BYTES) throw new Error("That playlist is too large (over 100 MB).");
 
-    const text = (await res.text()).slice(0, MAX_BYTES);
+    const body = text.slice(0, MAX_BYTES);
     return {
-      text,
-      finalUrl: res.url || url.toString(),
-      contentType: res.headers.get("content-type") ?? "",
-      bytes: text.length,
+      text: body,
+      finalUrl: finalRes.url || url.toString(),
+      contentType: finalRes.headers.get("content-type") ?? "",
+      bytes: body.length,
     };
   });
 

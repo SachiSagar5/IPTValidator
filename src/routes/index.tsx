@@ -1,17 +1,29 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import {
   Bookmark,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Copy,
   FileText,
+  FileUp,
   Globe,
   Hourglass,
+  KeyRound,
+  Link2,
+  ListVideo,
   PlayCircle,
   Radio,
+  Router,
+  ScanLine,
+  ShieldCheck,
+  Sparkles,
+  TextCursorInput,
   Tv,
   Upload,
   XCircle,
@@ -40,6 +52,7 @@ import {
 } from "@/lib/playlist.functions";
 import { deleteDraft, listDrafts, saveDraft, type Draft } from "@/lib/draft.functions";
 import {
+  checkXtreamAccount,
   fetchStalkerVod,
   fetchXtreamSeriesEpisodes,
   fetchXtreamVod,
@@ -56,11 +69,34 @@ import {
   safeFileName,
 } from "@/lib/playlist-store";
 import { PENDING_XTREAM_KEY } from "@/lib/accounts";
+import {
+  credentialKey,
+  detectCredential,
+  detectCredentials,
+  describeCredential,
+} from "@/lib/autodetect";
+import type { DetectedCredential } from "@/lib/autodetect";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const TITLE = "StreamCheck — IPTV M3U Validator & Playlist Builder";
 const DESCRIPTION =
   "Validate M3U IPTV playlists channel by channel, import links or files, then save and export clean playlists with your own name.";
+
+/** Per-type icon + accent tone used by the Auto Detect results table. */
+const CREDENTIAL_META: Record<
+  DetectedCredential["type"],
+  { Icon: typeof KeyRound; tone: "accent" | "primary" | "success" }
+> = {
+  xtream: { Icon: KeyRound, tone: "accent" },
+  stalker: { Icon: Router, tone: "primary" },
+  m3u: { Icon: ListVideo, tone: "success" },
+};
+
+type CredState = "checking" | "valid" | "invalid";
+type CredStatus = { state: CredState; message?: string };
+
+const AUTO_PAGE_SIZE = 20;
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -124,6 +160,7 @@ function Dashboard() {
   const saveDraftFns = useServerFn(saveDraft);
   const deleteDraftFns = useServerFn(deleteDraft);
   const xtreamLogin = useServerFn(loginXtream);
+  const xtreamCheck = useServerFn(checkXtreamAccount);
   const stalkerLogin = useServerFn(loginStalker);
   const xtreamVod = useServerFn(fetchXtreamVod);
   const stalkerVod = useServerFn(fetchStalkerVod);
@@ -150,7 +187,15 @@ function Dashboard() {
   const [savedPlaylistsOpen, setSavedPlaylistsOpen] = useState(true);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draftBusy, setDraftBusy] = useState(false);
-  const [sourceTab, setSourceTab] = useState<"m3u" | "xtream" | "stalker">("m3u");
+  const [sourceTab, setSourceTab] = useState<"m3u" | "xtream" | "stalker" | "auto">("m3u");
+  const [autoDetectText, setAutoDetectText] = useState("");
+  const [detectedList, setDetectedList] = useState<DetectedCredential[]>([]);
+  const [credStatus, setCredStatus] = useState<Record<string, CredStatus>>({});
+  const [markedKeys, setMarkedKeys] = useState<Record<string, boolean>>({});
+  const [autoPage, setAutoPage] = useState(1);
+  const [validatingAll, setValidatingAll] = useState(false);
+  const [autoDrag, setAutoDrag] = useState(false);
+  const autoFileRef = useRef<HTMLInputElement>(null);
   const [channelPage, setChannelPage] = useState(1);
   const [xtreamServer, setXtreamServer] = useState("");
   const [xtreamUser, setXtreamUser] = useState("");
@@ -822,16 +867,11 @@ function Dashboard() {
       if (creds.type === "xtream") {
         void runXtream(creds.server, creds.username, creds.password, true);
       } else {
-        void runStalker(
-          creds.server,
-          creds.mac,
-          true,
-          {
-            ...(creds.serialNumber ? { serialNumber: creds.serialNumber } : {}),
-            ...(creds.deviceId1 ? { deviceId1: creds.deviceId1 } : {}),
-            ...(creds.deviceId2 ? { deviceId2: creds.deviceId2 } : {}),
-          },
-        );
+        void runStalker(creds.server, creds.mac, true, {
+          ...(creds.serialNumber ? { serialNumber: creds.serialNumber } : {}),
+          ...(creds.deviceId1 ? { deviceId1: creds.deviceId1 } : {}),
+          ...(creds.deviceId2 ? { deviceId2: creds.deviceId2 } : {}),
+        });
       }
       return;
     }
@@ -846,6 +886,182 @@ function Dashboard() {
     });
   }
 
+  function fillCredential(cred: DetectedCredential) {
+    setMarkedKeys((prev) => ({ ...prev, [credentialKey(cred)]: true }));
+
+    if (cred.type === "xtream") {
+      setXtreamServer(cred.server);
+      setXtreamUser(cred.username);
+      setXtreamPass(cred.password);
+      setSourceTab("xtream");
+      notify("ok", "Detected an Xtream Codes login — fields filled in.");
+    } else if (cred.type === "stalker") {
+      setStalkerServer(cred.server);
+      setStalkerMac(cred.mac);
+      setStalkerSerial(cred.serial ?? "");
+      setStalkerDeviceId1(cred.deviceId1 ?? "");
+      setStalkerDeviceId2(cred.deviceId2 ?? "");
+      setSourceTab("stalker");
+      notify("ok", "Detected a Stalker Portal MAC — fields filled in.");
+    } else {
+      if (cred.urls.length === 1) {
+        setSingleUrl(cred.urls[0] ?? "");
+        setBulkUrls("");
+      } else {
+        setSingleUrl("");
+        setBulkUrls(cred.urls.join("\n"));
+      }
+      setSourceTab("m3u");
+      notify(
+        "ok",
+        `Detected ${cred.urls.length} playlist link${cred.urls.length === 1 ? "" : "s"} — fields filled in.`,
+      );
+    }
+    scrollToSources();
+  }
+
+  /** Really connects to the provider and reports whether the credentials work. */
+  async function validateCredential(cred: DetectedCredential): Promise<CredStatus> {
+    if (cred.type === "xtream") {
+      try {
+        const res = await xtreamCheck({
+          data: { server: cred.server, username: cred.username, password: cred.password },
+        });
+        return {
+          state: res.ok ? "valid" : "invalid",
+          message: res.ok ? res.detail : res.detail || "Invalid credentials.",
+        };
+      } catch (e) {
+        return {
+          state: "invalid",
+          message: e instanceof Error ? e.message : "Could not reach the server.",
+        };
+      }
+    }
+
+    if (cred.type === "stalker") {
+      const serialNumber = (cred.serial ?? "").trim();
+      const deviceId1 = (cred.deviceId1 ?? "").trim();
+      const deviceId2 = (cred.deviceId2 ?? "").trim();
+      try {
+        const res = await stalkerLogin({
+          data: {
+            server: cred.server,
+            mac: cred.mac,
+            ...(serialNumber ? { serialNumber } : {}),
+            ...(deviceId1 ? { deviceId1 } : {}),
+            ...(deviceId2 ? { deviceId2 } : {}),
+          },
+        });
+        return {
+          state: res.count > 0 ? "valid" : "invalid",
+          message:
+            res.count > 0
+              ? `Portal accepted the MAC · ${res.count} channels`
+              : "Portal answered but returned no channels.",
+        };
+      } catch (e) {
+        return {
+          state: "invalid",
+          message: e instanceof Error ? e.message : "Stalker login failed.",
+        };
+      }
+    }
+
+    // M3U: a link is valid when it loads and yields at least one channel.
+    const urls = cred.urls.filter(Boolean);
+    if (urls.length === 0) {
+      return { state: "invalid", message: "No playlist links to check." };
+    }
+    let working = 0;
+    let lastError = "";
+    for (const url of urls) {
+      try {
+        const res = await fetchRemote({ data: { url } });
+        const parsed = parseM3U(res.text);
+        if (parsed.channels.length > 0) working += 1;
+        else lastError = "Loaded but no channels were found.";
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : "Could not load that link.";
+      }
+    }
+    if (working > 0) {
+      return {
+        state: "valid",
+        message: `${working} of ${urls.length} link${urls.length === 1 ? "" : "s"} working`,
+      };
+    }
+    return { state: "invalid", message: lastError || "No working playlist links." };
+  }
+
+  async function runValidate(cred: DetectedCredential) {
+    const key = credentialKey(cred);
+    setCredStatus((prev) => ({ ...prev, [key]: { state: "checking" } }));
+    const result = await validateCredential(cred);
+    setCredStatus((prev) => ({ ...prev, [key]: result }));
+  }
+
+  async function validateAll() {
+    if (validatingAll) return;
+    setValidatingAll(true);
+    try {
+      for (const cred of detectedList) {
+        await runValidate(cred);
+      }
+      notify("ok", "Finished checking the detected credentials.");
+    } finally {
+      setValidatingAll(false);
+    }
+  }
+
+  function runAutoDetect(text: string) {
+    const found = detectCredentials(text);
+    setDetectedList(found);
+    setCredStatus({});
+    setMarkedKeys({});
+    setAutoPage(1);
+
+    if (found.length === 0) {
+      const single = detectCredential(text);
+      notify(
+        "error",
+        single.ok ? "Couldn't recognise any credentials in that text." : single.reason,
+      );
+      return;
+    }
+
+    if (found.length === 1) {
+      fillCredential(found[0] as DetectedCredential);
+      return;
+    }
+
+    notify("ok", `Found ${found.length} credentials — validate, then pick one to fill.`);
+  }
+
+  function handleAutoFill() {
+    runAutoDetect(autoDetectText);
+  }
+
+  async function readAutoFile(file: File) {
+    let text = "";
+    try {
+      text = await file.text();
+    } catch {
+      notify("error", "Couldn't read that file.");
+      return;
+    }
+
+    setAutoDetectText(text);
+    runAutoDetect(text);
+  }
+
+  async function handleAutoFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await readAutoFile(file);
+  }
+
   function resetWorkspace() {
     setChannels([]);
     setIssues([]);
@@ -856,8 +1072,37 @@ function Dashboard() {
     setProviderCreds(null);
   }
 
+  function clearFilledValues() {
+    // M3U
+    setSingleUrl("");
+    setBulkUrls("");
+    setPlaylistName("");
+    // Xtream
+    setXtreamServer("");
+    setXtreamUser("");
+    setXtreamPass("");
+    // Stalker
+    setStalkerServer("");
+    setStalkerMac("");
+    setStalkerSerial("");
+    setStalkerDeviceId1("");
+    setStalkerDeviceId2("");
+    // Auto Detect
+    setAutoDetectText("");
+    setDetectedList([]);
+    setCredStatus({});
+    setMarkedKeys({});
+    setAutoPage(1);
+    // Table controls
+    setSearch("");
+    setFilter("all");
+    setChannelPage(1);
+    setSourceTab("m3u");
+  }
+
   function resetAll() {
     resetWorkspace();
+    clearFilledValues();
     notify("ok", "Workspace cleared.");
   }
 
@@ -910,23 +1155,25 @@ function Dashboard() {
               subtitle="Import from M3U links, Xtream Codes, or Stalker Portal."
             >
               <div className="space-y-4">
-                <div className="flex rounded-lg border border-border bg-background/40 p-1 shadow-inner">
+                <div className="flex overflow-x-auto rounded-lg border border-border bg-background/40 p-1 shadow-inner">
                   {(
                     [
-                      { key: "m3u", label: "M3U Link" },
-                      { key: "xtream", label: "Xtream Codes" },
-                      { key: "stalker", label: "Stalker Portal" },
+                      { key: "m3u", label: "M3U Link", Icon: Link2 },
+                      { key: "xtream", label: "Xtream Codes", Icon: KeyRound },
+                      { key: "stalker", label: "Stalker Portal", Icon: Router },
+                      { key: "auto", label: "Auto Detect", Icon: Sparkles },
                     ] as const
                   ).map((t) => (
                     <button
                       key={t.key}
                       onClick={() => setSourceTab(t.key)}
-                      className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      className={`inline-flex flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
                         sourceTab === t.key
                           ? "bg-primary text-primary-foreground"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
+                      <t.Icon className="size-3.5" />
                       {t.label}
                     </button>
                   ))}
@@ -1077,6 +1324,242 @@ function Dashboard() {
                     <p className="text-[11px] text-muted-foreground">
                       Authenticates with the Stalker/Ministra portal using your MAC address,
                       retrieves the channel list, and loads it into the workspace.
+                    </p>
+                  </div>
+                )}
+
+                {sourceTab === "auto" && (
+                  <div className="space-y-4">
+                    <div className="relative">
+                      <span className="pointer-events-none absolute top-3 left-3 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                        <Sparkles className="size-3.5 text-accent" />
+                        Paste credentials
+                      </span>
+                      <Textarea
+                        rows={6}
+                        className="pt-9"
+                        value={autoDetectText}
+                        onChange={(e) => setAutoDetectText(e.target.value)}
+                        placeholder={
+                          "Paste anything, for example:\nhttp://portal.example.com  00:1A:79:XX:XX:XX\nUsername: user  Password: pass  Server: http://panel.example.com:8080\nhttps://example.com/playlist.m3u"
+                        }
+                      />
+                    </div>
+
+                    <input
+                      ref={autoFileRef}
+                      type="file"
+                      accept=".txt,.csv,.m3u,.m3u8,text/plain"
+                      className="hidden"
+                      onChange={(e) => void handleAutoFile(e)}
+                    />
+
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="w-full"
+                      disabled={!autoDetectText.trim()}
+                      onClick={handleAutoFill}
+                    >
+                      <Sparkles className="size-4" />
+                      Auto fill
+                    </Button>
+
+                    <button
+                      type="button"
+                      onClick={() => autoFileRef.current?.click()}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setAutoDrag(true);
+                      }}
+                      onDragLeave={() => setAutoDrag(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setAutoDrag(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) void readAutoFile(file);
+                      }}
+                      className={cn(
+                        "flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors",
+                        autoDrag
+                          ? "border-accent bg-accent/10 text-accent"
+                          : "border-border bg-background/40 text-muted-foreground hover:border-accent/50 hover:bg-accent/5 hover:text-foreground",
+                      )}
+                    >
+                      <span className="flex size-10 items-center justify-center rounded-full bg-accent/10 text-accent">
+                        <FileUp className="size-5" />
+                      </span>
+                      <span className="text-xs font-medium">
+                        Drop a text file here or click to browse
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        .txt, .csv, .m3u, .m3u8 — we find every credential inside
+                      </span>
+                    </button>
+
+                    {detectedList.length > 1 &&
+                      (() => {
+                        const totalPages = Math.max(
+                          1,
+                          Math.ceil(detectedList.length / AUTO_PAGE_SIZE),
+                        );
+                        const safePage = Math.min(autoPage, totalPages);
+                        const pageItems = detectedList.slice(
+                          (safePage - 1) * AUTO_PAGE_SIZE,
+                          safePage * AUTO_PAGE_SIZE,
+                        );
+
+                        return (
+                          <div className="overflow-hidden rounded-xl border border-border bg-background/40">
+                            <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
+                              <span className="flex items-center gap-1.5 text-xs font-medium">
+                                <ListVideo className="size-3.5 text-muted-foreground" />
+                                Found {detectedList.length} credentials
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={validatingAll}
+                                onClick={() => void validateAll()}
+                              >
+                                {validatingAll ? (
+                                  <Spinner className="size-3.5" />
+                                ) : (
+                                  <ShieldCheck className="size-3.5" />
+                                )}
+                                {validatingAll ? "Checking…" : "Validate all"}
+                              </Button>
+                            </div>
+
+                            <ul className="divide-y divide-border">
+                              {pageItems.map((cred) => {
+                                const key = credentialKey(cred);
+                                const info = describeCredential(cred);
+                                const meta = CREDENTIAL_META[cred.type];
+                                const status = credStatus[key];
+                                const marked = markedKeys[key];
+                                const checking = status?.state === "checking";
+                                const valid = status?.state === "valid";
+
+                                return (
+                                  <li
+                                    key={key}
+                                    className="flex flex-wrap items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40 sm:flex-nowrap"
+                                  >
+                                    <span
+                                      className={cn(
+                                        "flex size-8 shrink-0 items-center justify-center rounded-lg border",
+                                        meta.tone === "accent" &&
+                                          "border-accent/30 bg-accent/10 text-accent",
+                                        meta.tone === "primary" &&
+                                          "border-primary/30 bg-primary/10 text-primary",
+                                        meta.tone === "success" &&
+                                          "border-success/30 bg-success/10 text-success",
+                                      )}
+                                    >
+                                      <meta.Icon className="size-4" />
+                                    </span>
+
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <p className="text-xs font-medium">{info.type}</p>
+                                        <Badge tone={meta.tone}>
+                                          {cred.type === "m3u"
+                                            ? `${cred.urls.length} link${cred.urls.length === 1 ? "" : "s"}`
+                                            : cred.type === "xtream"
+                                              ? "Login"
+                                              : "MAC"}
+                                        </Badge>
+                                        {marked && (
+                                          <Badge tone="success">
+                                            <CheckCircle2 className="size-3" />
+                                            Marked
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <p className="truncate font-mono text-[11px] text-muted-foreground">
+                                        {info.detail}
+                                      </p>
+                                      {status?.message && (
+                                        <p
+                                          className={cn(
+                                            "mt-0.5 text-[11px]",
+                                            valid
+                                              ? "text-success"
+                                              : checking
+                                                ? "text-muted-foreground"
+                                                : "text-destructive",
+                                          )}
+                                        >
+                                          {status.message}
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <div className="flex shrink-0 items-center gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={checking}
+                                        onClick={() => void runValidate(cred)}
+                                      >
+                                        {checking ? (
+                                          <Spinner className="size-3.5" />
+                                        ) : (
+                                          <ShieldCheck className="size-3.5" />
+                                        )}
+                                        {checking ? "Checking" : "Validate"}
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="primary"
+                                        disabled={!valid}
+                                        onClick={() => fillCredential(cred)}
+                                      >
+                                        <TextCursorInput className="size-3.5" />
+                                        Fill
+                                      </Button>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+
+                            {totalPages > 1 && (
+                              <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/30 px-3 py-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={safePage <= 1}
+                                  onClick={() => setAutoPage(safePage - 1)}
+                                >
+                                  <ChevronLeft className="size-3.5" />
+                                  Prev
+                                </Button>
+                                <span className="text-[11px] text-muted-foreground">
+                                  Page {safePage} of {totalPages}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={safePage >= totalPages}
+                                  onClick={() => setAutoPage(safePage + 1)}
+                                >
+                                  Next
+                                  <ChevronRight className="size-3.5" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                    <p className="text-[11px] text-muted-foreground">
+                      Paste a portal + MAC, an Xtream Codes login, or an M3U link — or drop a text
+                      file with several of them. We detect the type and, when there's just one, fill
+                      the matching tab and switch to it. With several results, hit Validate to
+                      confirm a row really works, then Fill it — the row is marked once used.
+                      Connecting stays manual.
                     </p>
                   </div>
                 )}
