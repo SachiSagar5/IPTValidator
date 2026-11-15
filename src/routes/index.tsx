@@ -12,6 +12,7 @@ import {
   Copy,
   FileText,
   FileUp,
+  Filter,
   Globe,
   Hourglass,
   KeyRound,
@@ -194,6 +195,8 @@ function Dashboard() {
   const [markedKeys, setMarkedKeys] = useState<Record<string, boolean>>({});
   const [autoPage, setAutoPage] = useState(1);
   const [validatingAll, setValidatingAll] = useState(false);
+  const [autoProgress, setAutoProgress] = useState<{ done: number; total: number } | null>(null);
+  const [autoWorkingOnly, setAutoWorkingOnly] = useState(false);
   const [autoDrag, setAutoDrag] = useState(false);
   const autoFileRef = useRef<HTMLInputElement>(null);
   const [channelPage, setChannelPage] = useState(1);
@@ -994,23 +997,52 @@ function Dashboard() {
     return { state: "invalid", message: lastError || "No working playlist links." };
   }
 
-  async function runValidate(cred: DetectedCredential) {
+  async function runValidate(cred: DetectedCredential): Promise<CredStatus> {
     const key = credentialKey(cred);
     setCredStatus((prev) => ({ ...prev, [key]: { state: "checking" } }));
-    const result = await validateCredential(cred);
+    let result: CredStatus;
+    try {
+      result = await validateCredential(cred);
+    } catch (e) {
+      result = {
+        state: "invalid",
+        message: e instanceof Error ? e.message : "Could not check that credential.",
+      };
+    }
     setCredStatus((prev) => ({ ...prev, [key]: result }));
+    return result;
   }
 
   async function validateAll() {
-    if (validatingAll) return;
+    if (validatingAll || detectedList.length === 0) return;
     setValidatingAll(true);
-    try {
-      for (const cred of detectedList) {
-        await runValidate(cred);
+
+    const total = detectedList.length;
+    const queue = [...detectedList];
+    let done = 0;
+    let working = 0;
+    setAutoProgress({ done: 0, total });
+
+    async function worker() {
+      for (;;) {
+        const cred = queue.shift();
+        if (!cred) return;
+        const result = await runValidate(cred);
+        if (result.state === "valid") working += 1;
+        done += 1;
+        setAutoProgress({ done, total });
       }
-      notify("ok", "Finished checking the detected credentials.");
+    }
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(4, total) }, () => worker()));
+      notify(
+        working > 0 ? "ok" : "error",
+        `Checked ${total} credential${total === 1 ? "" : "s"} — ${working} working.`,
+      );
     } finally {
       setValidatingAll(false);
+      setAutoProgress(null);
     }
   }
 
@@ -1020,6 +1052,7 @@ function Dashboard() {
     setCredStatus({});
     setMarkedKeys({});
     setAutoPage(1);
+    setAutoWorkingOnly(false);
 
     if (found.length === 0) {
       const single = detectCredential(text);
@@ -1050,6 +1083,10 @@ function Dashboard() {
       notify("error", "Couldn't read that file.");
       return;
     }
+
+    // Files saved by Windows tools often start with a UTF-8 BOM, which would
+    // otherwise become part of the first line and break detection.
+    text = text.replace(/^\uFEFF/, "");
 
     setAutoDetectText(text);
     runAutoDetect(text);
@@ -1093,6 +1130,7 @@ function Dashboard() {
     setCredStatus({});
     setMarkedKeys({});
     setAutoPage(1);
+    setAutoWorkingOnly(false);
     // Table controls
     setSearch("");
     setFilter("all");
@@ -1349,7 +1387,7 @@ function Dashboard() {
                     <input
                       ref={autoFileRef}
                       type="file"
-                      accept=".txt,.csv,.m3u,.m3u8,text/plain"
+                      accept=".txt,.csv,.m3u,.m3u8,.json,.log,text/plain,text/*"
                       className="hidden"
                       onChange={(e) => void handleAutoFile(e)}
                     />
@@ -1399,131 +1437,179 @@ function Dashboard() {
 
                     {detectedList.length > 1 &&
                       (() => {
+                        const visibleList = autoWorkingOnly
+                          ? detectedList.filter(
+                              (c) => credStatus[credentialKey(c)]?.state === "valid",
+                            )
+                          : detectedList;
                         const totalPages = Math.max(
                           1,
-                          Math.ceil(detectedList.length / AUTO_PAGE_SIZE),
+                          Math.ceil(visibleList.length / AUTO_PAGE_SIZE),
                         );
                         const safePage = Math.min(autoPage, totalPages);
-                        const pageItems = detectedList.slice(
+                        const pageItems = visibleList.slice(
                           (safePage - 1) * AUTO_PAGE_SIZE,
                           safePage * AUTO_PAGE_SIZE,
                         );
 
                         return (
                           <div className="overflow-hidden rounded-xl border border-border bg-background/40">
-                            <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
                               <span className="flex items-center gap-1.5 text-xs font-medium">
                                 <ListVideo className="size-3.5 text-muted-foreground" />
-                                Found {detectedList.length} credentials
-                              </span>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={validatingAll}
-                                onClick={() => void validateAll()}
-                              >
-                                {validatingAll ? (
-                                  <Spinner className="size-3.5" />
-                                ) : (
-                                  <ShieldCheck className="size-3.5" />
+                                {autoWorkingOnly
+                                  ? `Working ${visibleList.length} of ${detectedList.length}`
+                                  : `Found ${detectedList.length} credentials`}
+                                {autoProgress && (
+                                  <span className="font-normal text-muted-foreground">
+                                    · {autoProgress.done}/{autoProgress.total}
+                                  </span>
                                 )}
-                                {validatingAll ? "Checking…" : "Validate all"}
-                              </Button>
+                              </span>
+                              <span className="flex items-center gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant={autoWorkingOnly ? "secondary" : "ghost"}
+                                  onClick={() => {
+                                    setAutoWorkingOnly((v) => !v);
+                                    setAutoPage(1);
+                                  }}
+                                  title="Show only credentials that validated"
+                                >
+                                  <Filter className="size-3.5" />
+                                  Working only
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={validatingAll}
+                                  onClick={() => void validateAll()}
+                                >
+                                  {validatingAll ? (
+                                    <Spinner className="size-3.5" />
+                                  ) : (
+                                    <ShieldCheck className="size-3.5" />
+                                  )}
+                                  {validatingAll ? "Checking…" : "Validate all"}
+                                </Button>
+                              </span>
                             </div>
 
-                            <ul className="divide-y divide-border">
-                              {pageItems.map((cred) => {
-                                const key = credentialKey(cred);
-                                const info = describeCredential(cred);
-                                const meta = CREDENTIAL_META[cred.type];
-                                const status = credStatus[key];
-                                const marked = markedKeys[key];
-                                const checking = status?.state === "checking";
-                                const valid = status?.state === "valid";
+                            {autoProgress && (
+                              <div className="h-1 w-full overflow-hidden bg-muted">
+                                <div
+                                  className="h-full bg-accent transition-all duration-200"
+                                  style={{
+                                    width: `${Math.round((autoProgress.done / Math.max(1, autoProgress.total)) * 100)}%`,
+                                  }}
+                                />
+                              </div>
+                            )}
 
-                                return (
-                                  <li
-                                    key={key}
-                                    className="flex flex-wrap items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40 sm:flex-nowrap"
-                                  >
-                                    <span
-                                      className={cn(
-                                        "flex size-8 shrink-0 items-center justify-center rounded-lg border",
-                                        meta.tone === "accent" &&
-                                          "border-accent/30 bg-accent/10 text-accent",
-                                        meta.tone === "primary" &&
-                                          "border-primary/30 bg-primary/10 text-primary",
-                                        meta.tone === "success" &&
-                                          "border-success/30 bg-success/10 text-success",
-                                      )}
+                            {pageItems.length === 0 ? (
+                              <div className="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+                                <Filter className="size-5 text-muted-foreground" />
+                                <p className="text-xs font-medium">No working credentials yet</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Run Validate all, or turn off “Working only” to see every detected
+                                  row.
+                                </p>
+                              </div>
+                            ) : (
+                              <ul className="divide-y divide-border">
+                                {pageItems.map((cred) => {
+                                  const key = credentialKey(cred);
+                                  const info = describeCredential(cred);
+                                  const meta = CREDENTIAL_META[cred.type];
+                                  const status = credStatus[key];
+                                  const marked = markedKeys[key];
+                                  const checking = status?.state === "checking";
+                                  const valid = status?.state === "valid";
+
+                                  return (
+                                    <li
+                                      key={key}
+                                      className="flex flex-wrap items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40 sm:flex-nowrap"
                                     >
-                                      <meta.Icon className="size-4" />
-                                    </span>
+                                      <span
+                                        className={cn(
+                                          "flex size-8 shrink-0 items-center justify-center rounded-lg border",
+                                          meta.tone === "accent" &&
+                                            "border-accent/30 bg-accent/10 text-accent",
+                                          meta.tone === "primary" &&
+                                            "border-primary/30 bg-primary/10 text-primary",
+                                          meta.tone === "success" &&
+                                            "border-success/30 bg-success/10 text-success",
+                                        )}
+                                      >
+                                        <meta.Icon className="size-4" />
+                                      </span>
 
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex flex-wrap items-center gap-1.5">
-                                        <p className="text-xs font-medium">{info.type}</p>
-                                        <Badge tone={meta.tone}>
-                                          {cred.type === "m3u"
-                                            ? `${cred.urls.length} link${cred.urls.length === 1 ? "" : "s"}`
-                                            : cred.type === "xtream"
-                                              ? "Login"
-                                              : "MAC"}
-                                        </Badge>
-                                        {marked && (
-                                          <Badge tone="success">
-                                            <CheckCircle2 className="size-3" />
-                                            Marked
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <p className="text-xs font-medium">{info.type}</p>
+                                          <Badge tone={meta.tone}>
+                                            {cred.type === "m3u"
+                                              ? `${cred.urls.length} link${cred.urls.length === 1 ? "" : "s"}`
+                                              : cred.type === "xtream"
+                                                ? "Login"
+                                                : "MAC"}
                                           </Badge>
+                                          {marked && (
+                                            <Badge tone="success">
+                                              <CheckCircle2 className="size-3" />
+                                              Marked
+                                            </Badge>
+                                          )}
+                                        </div>
+                                        <p className="truncate font-mono text-[11px] text-muted-foreground">
+                                          {info.detail}
+                                        </p>
+                                        {status?.message && (
+                                          <p
+                                            className={cn(
+                                              "mt-0.5 text-[11px]",
+                                              valid
+                                                ? "text-success"
+                                                : checking
+                                                  ? "text-muted-foreground"
+                                                  : "text-destructive",
+                                            )}
+                                          >
+                                            {status.message}
+                                          </p>
                                         )}
                                       </div>
-                                      <p className="truncate font-mono text-[11px] text-muted-foreground">
-                                        {info.detail}
-                                      </p>
-                                      {status?.message && (
-                                        <p
-                                          className={cn(
-                                            "mt-0.5 text-[11px]",
-                                            valid
-                                              ? "text-success"
-                                              : checking
-                                                ? "text-muted-foreground"
-                                                : "text-destructive",
-                                          )}
-                                        >
-                                          {status.message}
-                                        </p>
-                                      )}
-                                    </div>
 
-                                    <div className="flex shrink-0 items-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        disabled={checking}
-                                        onClick={() => void runValidate(cred)}
-                                      >
-                                        {checking ? (
-                                          <Spinner className="size-3.5" />
-                                        ) : (
-                                          <ShieldCheck className="size-3.5" />
-                                        )}
-                                        {checking ? "Checking" : "Validate"}
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="primary"
-                                        disabled={!valid}
-                                        onClick={() => fillCredential(cred)}
-                                      >
-                                        <TextCursorInput className="size-3.5" />
-                                        Fill
-                                      </Button>
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
+                                      <div className="flex shrink-0 items-center gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          disabled={checking}
+                                          onClick={() => void runValidate(cred)}
+                                        >
+                                          {checking ? (
+                                            <Spinner className="size-3.5" />
+                                          ) : (
+                                            <ShieldCheck className="size-3.5" />
+                                          )}
+                                          {checking ? "Checking" : "Validate"}
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="primary"
+                                          disabled={!valid}
+                                          onClick={() => fillCredential(cred)}
+                                        >
+                                          <TextCursorInput className="size-3.5" />
+                                          Fill
+                                        </Button>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
 
                             {totalPages > 1 && (
                               <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/30 px-3 py-2">
