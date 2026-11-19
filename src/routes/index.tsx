@@ -80,7 +80,7 @@ import type { DetectedCredential } from "@/lib/autodetect";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const TITLE = "StreamCheck — IPTV M3U Validator & Playlist Builder";
+const TITLE = "StreamCheck, IPTV M3U Validator and Playlist Builder";
 const DESCRIPTION =
   "Validate M3U IPTV playlists channel by channel, import links or files, then save and export clean playlists with your own name.";
 
@@ -1153,16 +1153,15 @@ function Dashboard() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="relative flex size-2">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/50" />
               <span className="relative inline-flex size-2 rounded-full bg-primary" />
             </span>
-            <p className="font-mono text-[11px] tracking-[0.3em] text-primary uppercase">
+            <p className="text-xs font-medium text-primary">
               Streamcheck · Live signal
             </p>
           </div>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-5xl">
             IPTV playlist{" "}
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+            <span className="text-primary">
               validator
             </span>
           </h1>
@@ -1174,7 +1173,7 @@ function Dashboard() {
         <div className="flex items-center gap-2">
           <Link
             to="/accounts"
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-muted"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-secondary px-3 py-2 text-xs font-medium text-secondary-foreground transition-colors hover:bg-muted"
           >
             <Upload className="size-3.5" />
             Import accounts
@@ -1186,7 +1185,7 @@ function Dashboard() {
       </header>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <div ref={sourcesRef}>
             <Panel
               title="Add sources"
@@ -1205,7 +1204,7 @@ function Dashboard() {
                     <button
                       key={t.key}
                       onClick={() => setSourceTab(t.key)}
-                      className={`inline-flex flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                      className={`inline-flex flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors ${
                         sourceTab === t.key
                           ? "bg-primary text-primary-foreground"
                           : "text-muted-foreground hover:text-foreground"
@@ -1230,6 +1229,7 @@ function Dashboard() {
                       />
                       <Button
                         variant="primary"
+                        className="whitespace-nowrap"
                         disabled={busy}
                         onClick={() => void addSingleUrl(singleUrl)}
                       >
@@ -1418,7 +1418,7 @@ function Dashboard() {
                         if (file) void readAutoFile(file);
                       }}
                       className={cn(
-                        "flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors",
+                        "flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 text-center transition-colors",
                         autoDrag
                           ? "border-accent bg-accent/10 text-accent"
                           : "border-border bg-background/40 text-muted-foreground hover:border-accent/50 hover:bg-accent/5 hover:text-foreground",
@@ -1431,7 +1431,7 @@ function Dashboard() {
                         Drop a text file here or click to browse
                       </span>
                       <span className="text-[11px] text-muted-foreground">
-                        .txt, .csv, .m3u, .m3u8 — we find every credential inside
+                        .txt, .csv, .m3u, .m3u8: we find every credential inside
                       </span>
                     </button>
 
@@ -1498,9 +1498,9 @@ function Dashboard() {
                             {autoProgress && (
                               <div className="h-1 w-full overflow-hidden bg-muted">
                                 <div
-                                  className="h-full bg-accent transition-all duration-200"
+                                  className="h-full w-full origin-left bg-accent transition-transform duration-200"
                                   style={{
-                                    width: `${Math.round((autoProgress.done / Math.max(1, autoProgress.total)) * 100)}%`,
+                                    transform: `scaleX(${Math.round((autoProgress.done / Math.max(1, autoProgress.total)) * 100) / 100})`,
                                   }}
                                 />
                               </div>
@@ -1641,10 +1641,10 @@ function Dashboard() {
                       })()}
 
                     <p className="text-[11px] text-muted-foreground">
-                      Paste a portal + MAC, an Xtream Codes login, or an M3U link — or drop a text
-                      file with several of them. We detect the type and, when there's just one, fill
+                      Paste a portal + MAC, an Xtream Codes login, or an M3U link, or drop a text
+                      file with several of them. We detect the type and, when there’s just one, fill
                       the matching tab and switch to it. With several results, hit Validate to
-                      confirm a row really works, then Fill it — the row is marked once used.
+                      confirm a row really works, then Fill it: the row is marked once used.
                       Connecting stays manual.
                     </p>
                   </div>
@@ -1682,7 +1682,7 @@ function Dashboard() {
                   <button
                     key={m}
                     onClick={() => setMode(m)}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`rounded-md px-3 py-2 text-xs font-medium transition-colors ${
                       mode === m
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:text-foreground"
@@ -1714,9 +1714,9 @@ function Dashboard() {
               <div className="mt-4">
                 <div className="h-2 overflow-hidden rounded-full bg-secondary">
                   <div
-                    className="h-full bg-primary transition-all"
+                    className="h-full w-full origin-left bg-primary transition-transform"
                     style={{
-                      width: `${Math.round((progress.done / Math.max(progress.total, 1)) * 100)}%`,
+                      transform: `scaleX(${Math.round((progress.done / Math.max(progress.total, 1)) * 100) / 100})`,
                     }}
                   />
                 </div>
@@ -1769,7 +1769,7 @@ function Dashboard() {
                   className="rounded-lg border border-border bg-surface/60 px-3 py-3 transition-colors hover:border-primary/40"
                 >
                   <div className="flex items-center justify-between">
-                    <dt className="text-[11px] tracking-wide text-muted-foreground uppercase">
+                    <dt className="text-xs font-medium text-muted-foreground">
                       {s.label}
                     </dt>
                     <s.icon className={`size-4 ${s.iconClass}`} />
@@ -1794,7 +1794,7 @@ function Dashboard() {
                       >
                         line {i.line}
                       </span>{" "}
-                      — {i.message}
+                      - {i.message}
                     </li>
                   ))}
                 </ul>
@@ -1849,7 +1849,7 @@ function Dashboard() {
               <>
                 <div className="max-h-[540px] overflow-auto rounded-lg border border-border">
                   <table className="w-full text-left text-sm">
-                    <thead className="sticky top-0 z-10 bg-surface/90 text-[11px] tracking-[0.08em] text-muted-foreground uppercase backdrop-blur">
+                    <thead className="sticky top-0 z-10 bg-surface/90 text-xs text-muted-foreground backdrop-blur">
                       <tr>
                         <th className="px-3 py-2.5 font-medium">Channel</th>
                         <th className="px-3 py-2.5 font-medium">Group</th>
@@ -1892,7 +1892,7 @@ function Dashboard() {
                               </div>
                             </td>
                             <td className="px-3 py-2 text-xs text-muted-foreground">
-                              {c.group ?? "—"}
+                              {c.group ?? "n/a"}
                             </td>
                             <td className="px-3 py-2">
                               {!r ? (
@@ -1923,7 +1923,7 @@ function Dashboard() {
                               )}
                             </td>
                             <td className="max-w-[220px] truncate px-3 py-2 text-[11px] text-muted-foreground">
-                              {r?.detail ?? (r?.httpStatus ? `HTTP ${r.httpStatus}` : "—")}
+                              {r?.detail ?? (r?.httpStatus ? `HTTP ${r.httpStatus}` : "n/a")}
                             </td>
                             <td className="px-3 py-2 text-right">
                               <div className="flex items-center justify-end gap-2">
@@ -1986,7 +1986,7 @@ function Dashboard() {
           </Panel>
         </div>
 
-        <aside className="space-y-5">
+        <aside className="min-w-0 space-y-5">
           <Collapsible open={savePlaylistOpen} onOpenChange={setSavePlaylistOpen} className="panel">
             <div className="p-5">
               <CollapsibleTrigger asChild>
@@ -2019,7 +2019,7 @@ function Dashboard() {
                       type="checkbox"
                       checked={workingOnly}
                       onChange={(e) => setWorkingOnly(e.target.checked)}
-                      className="size-4 accent-[oklch(0.86_0.19_124)]"
+                      className="size-4 accent-primary"
                     />
                     Include only channels that passed validation ({stats.ok})
                   </label>
@@ -2110,7 +2110,7 @@ function Dashboard() {
                       {saved.map((p) => (
                         <li
                           key={p.id}
-                          className="rounded-lg border border-border bg-surface/50 p-3 transition-all hover:border-primary/40 hover:bg-surface/80 hover:shadow-[0_10px_28px_-16px_oklch(0_0_0/0.7)]"
+                          className="rounded-lg border border-border bg-surface/50 p-3 transition-colors hover:border-input hover:bg-surface/80"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
@@ -2210,7 +2210,7 @@ function Dashboard() {
                 {drafts.map((d) => (
                   <li
                     key={d.id}
-                    className="rounded-lg border border-border bg-surface/50 p-3 transition-all hover:border-primary/40 hover:bg-surface/80"
+                    className="rounded-lg border border-border bg-surface/50 p-3 transition-colors hover:border-input hover:bg-surface/80"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">

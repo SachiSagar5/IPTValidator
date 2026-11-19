@@ -1,0 +1,101 @@
+/* Hallmark · Console (deal 2/3, seed 5fc888c9) · tokens for the app shell
+ * graphite stepped in four lightnesses, amber for what a person did, cool for what an instrument measured */
+
+@theme static {
+  /* type scale — ratio 1.2, no fluid heads (app scope) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.2rem;
+  --text-xl: 1.44rem;
+  --text-2xl: 1.728rem;
+  --text-3xl: 2.074rem;
+  --text-display-s: 1.44rem;
+  --text-display: 1.728rem;
+  --text-section: 1.2rem;
+  --text-title: 1rem;
+  --text-lead: 1rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ground: four steps of one graphite, nothing glows */
+  --color-paper: oklch(17% 0.008 250);
+  --color-panel: oklch(20.5% 0.009 250);
+  --color-raised: oklch(24.5% 0.01 250);
+  --color-sunken: oklch(13.5% 0.007 250);
+
+  --color-ink: oklch(95% 0.005 250);
+  --color-ink-2: oklch(83% 0.008 250);
+  --color-ink-muted: oklch(71% 0.01 250);
+  --color-rule: oklch(31% 0.01 250);
+  --color-rule-2: oklch(42% 0.012 250);
+
+  /* amber: a person, a deviation, the one primary control */
+  --color-accent: oklch(82% 0.15 80);
+  --color-accent-ink: oklch(18% 0.04 75);
+  --color-accent-soft: oklch(29% 0.05 80);
+  --color-focus: oklch(82% 0.15 80);
+
+  /* cool: a reading, a trace, an instrument */
+  --color-cool: oklch(77% 0.12 245);
+  --color-cool-ink: oklch(18% 0.03 245);
+  --color-cool-soft: oklch(29% 0.05 245);
+
+  /* status only */
+  --color-ok: oklch(76% 0.15 150);
+  --color-ok-soft: oklch(24.5% 0.03 150);
+  --color-bad: oklch(70% 0.17 25);
+  --color-bad-soft: oklch(24.5% 0.035 25);
+  --color-warn: oklch(80% 0.14 62);
+  --color-warn-soft: oklch(26% 0.045 62);
+
+  --font-display: "Host Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-display);
+  --font-outlier: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+
+  --radius-card: 10px;
+  --radius-pill: 6px;
+  --shadow-card: none;
+  --tracking-display: -0.02em;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* layout scale (kept small: this is a screen someone works in) */
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+  --space-4xl: 96px;
+
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+
+  --container: 1440px;
+  --gutter: 20px;
+  --rule-hair: 1px;
+  --display-weight: 500;
+
+  --z-base: 1;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-sticky-nav: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --gutter: 32px;
+  }
+}

@@ -278,7 +278,7 @@ function MoviesPanel({
             {visible.map((m) => (
               <div
                 key={m.id}
-                className="group flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]"
+                className="group flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-colors hover:border-input hover:bg-surface"
               >
                 <button
                   type="button"
@@ -296,7 +296,7 @@ function MoviesPanel({
                   <div className="relative aspect-video w-full">
                     <Poster src={m.logo} name={m.name} />
                     <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
-                      <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_0_24px_-4px_oklch(0.86_0.19_124/0.9)]">
+                      <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
                         <PlayCircle className="size-5" />
                       </span>
                     </span>
@@ -414,7 +414,7 @@ function SeriesPanel({
               return (
                 <div
                   key={s.id}
-                  className="group flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]"
+                  className="group flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40 text-left transition-colors hover:border-input hover:bg-surface"
                 >
                   <button
                     type="button"
@@ -424,7 +424,7 @@ function SeriesPanel({
                     <div className="relative aspect-video w-full">
                       <Poster src={s.logo} name={s.name} />
                       <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
-                        <span className="flex size-10 items-center justify-center rounded-full bg-surface/90 text-foreground shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]">
+                        <span className="flex size-10 items-center justify-center rounded-full bg-surface/90 text-foreground">
                           {loadingIds[s.id] ? (
                             <Spinner className="size-5" />
                           ) : (
@@ -476,7 +476,7 @@ function SeriesPanel({
                       ) : (
                         s.seasons.map((seasonObj: SeriesSeason) => (
                           <div key={seasonObj.season}>
-                            <p className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                            <p className="mb-2 text-xs font-medium text-muted-foreground">
                               {seasonObj.name}
                             </p>
                             <div className="space-y-2">

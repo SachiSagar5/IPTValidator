@@ -196,7 +196,7 @@ function AccountsPage() {
           </Link>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
             Import{" "}
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+            <span className="text-primary">
               accounts
             </span>
           </h1>
@@ -270,7 +270,7 @@ function AccountsPage() {
                       type="checkbox"
                       checked={onlyWorking}
                       onChange={(e) => setOnlyWorking(e.target.checked)}
-                      className="size-4 accent-[oklch(0.86_0.19_124)]"
+                      className="size-4 accent-primary"
                     />
                     Show only working accounts
                   </label>
@@ -291,7 +291,7 @@ function AccountsPage() {
 
                 <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="w-full min-w-[860px] text-left text-sm">
-                    <thead className="bg-surface/90 text-[11px] tracking-[0.08em] text-muted-foreground uppercase backdrop-blur">
+                    <thead className="bg-surface/90 text-xs text-muted-foreground backdrop-blur">
                       <tr>
                         <th className="px-3 py-2.5 font-medium" />
                         <th className="px-3 py-2.5 font-medium">URL</th>
@@ -364,7 +364,7 @@ function AccountsPage() {
                                     <span className="truncate">failed</span>
                                   </span>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">—</span>
+                                  <span className="text-xs text-muted-foreground">n/a</span>
                                 )}
                                 <Button
                                   size="sm"

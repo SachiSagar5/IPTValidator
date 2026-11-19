@@ -290,8 +290,8 @@ export function ChannelPlayer({
   };
 
   return (
-    <div className="mt-4 overflow-hidden rounded-2xl border border-primary/20 bg-black/70 shadow-[0_24px_60px_-30px_oklch(0_0_0/0.9)] backdrop-blur">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/70 bg-gradient-to-r from-surface/90 via-surface/60 to-surface/30 px-4 py-2.5">
+    <div className="mt-4 overflow-hidden rounded-2xl border border-primary/20 bg-black/80">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/70 bg-surface/80 px-4 py-2.5">
         {channel.logo ? (
           <img
             src={channel.logo}
@@ -311,12 +311,11 @@ export function ChannelPlayer({
           <div className="flex items-center gap-2">
             <p className="truncate text-sm font-semibold">{channel.name}</p>
             {!isVod && (
-              <span className="flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-destructive">
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
                 <span className="relative flex size-1.5">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/70" />
                   <span className="relative inline-flex size-1.5 rounded-full bg-destructive" />
                 </span>
-                LIVE
+                Live
               </span>
             )}
             {isVod && (
@@ -343,7 +342,6 @@ export function ChannelPlayer({
           )}
           <Badge tone="accent">
             <span className="relative flex size-1.5">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-accent/60" />
               <span className="relative inline-flex size-1.5 rounded-full bg-accent" />
             </span>
             {engine === "native" ? "built-in" : engine}
@@ -363,6 +361,7 @@ export function ChannelPlayer({
       <div className="relative aspect-video w-full bg-black">
         <video
           ref={videoRef}
+          poster={channel.logo || undefined}
           controls
           autoPlay
           playsInline
@@ -393,8 +392,7 @@ export function ChannelPlayer({
         {!error && status && !ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/60">
             <span className="relative flex size-16">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/40" />
-              <span className="relative inline-flex size-16 items-center justify-center rounded-full border border-primary/30 bg-primary/15 shadow-[0_0_40px_-8px_oklch(0.86_0.19_124/0.6)] backdrop-blur">
+              <span className="relative inline-flex size-16 items-center justify-center rounded-full border border-primary/30 bg-primary/15">
                 <Spinner className="size-6 text-primary" />
               </span>
             </span>
@@ -405,7 +403,7 @@ export function ChannelPlayer({
         {/* Mid-playback buffering overlay */}
         {!error && ready && buffering && playing && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-            <span className="flex items-center gap-2.5 rounded-full border border-primary/25 bg-black/75 px-4 py-2 text-sm font-medium text-white backdrop-blur">
+            <span className="flex items-center gap-2.5 rounded-full border border-primary/25 bg-black/75 px-4 py-2 text-sm font-medium text-white">
               <Spinner className="size-4 text-primary" />
               Buffering…
             </span>
@@ -437,7 +435,7 @@ export function ChannelPlayer({
         {/* Compact status chip (e.g. "Press play to start.") */}
         {!error && ready && status && !playing && (
           <div className="pointer-events-none absolute inset-x-0 bottom-12 flex justify-center">
-            <span className="flex items-center gap-2 rounded-full border border-border/40 bg-black/70 px-3 py-1 text-xs text-white/80 backdrop-blur">
+            <span className="flex items-center gap-2 rounded-full border border-border/40 bg-black/70 px-3 py-1 text-xs text-white/80">
               <Volume2 className="size-3.5" />
               {status}
             </span>

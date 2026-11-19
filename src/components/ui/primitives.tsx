@@ -17,19 +17,19 @@ export function Button({ className, variant = "secondary", size = "md", ...props
     <button
       {...props}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100",
-        size === "sm" && "px-3 py-1.5 text-xs h-8",
-        size === "md" && "px-4 py-2 text-sm h-9",
-        size === "lg" && "px-6 py-2.5 text-base h-11",
+        "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors duration-(--dur-micro) focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        size === "sm" && "px-3 text-xs h-8",
+        size === "md" && "px-4 text-sm h-9",
+        size === "lg" && "px-6 text-base h-11",
         variant === "primary" &&
-          "bg-primary text-primary-foreground shadow-[0_10px_28px_-12px_oklch(0.86_0.19_124/0.75)] hover:bg-primary/90 hover:shadow-[0_14px_34px_-12px_oklch(0.86_0.19_124/0.9)] focus-visible:ring-primary/50",
+          "bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-primary/50",
         variant === "secondary" &&
-          "border border-border bg-secondary text-secondary-foreground hover:bg-muted hover:border-border active:bg-muted",
+          "border border-border bg-secondary text-secondary-foreground hover:bg-muted hover:border-input",
         variant === "ghost" && "text-muted-foreground hover:bg-secondary hover:text-foreground",
         variant === "danger" &&
           "border border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60",
         variant === "accent" &&
-          "bg-accent text-accent-foreground shadow-[0_10px_28px_-12px_oklch(0.78_0.13_210/0.75)] hover:bg-accent/90 hover:shadow-[0_14px_34px_-12px_oklch(0.78_0.13_210/0.9)]",
+          "border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/60",
         className,
       )}
     />
@@ -55,7 +55,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
     <input
       {...props}
       className={cn(
-        "w-full rounded-lg border border-input bg-background/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/40 focus:outline-none transition-all",
+        "w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/40 focus:outline-none transition-colors duration-(--dur-micro)",
         className,
       )}
     />
@@ -68,7 +68,7 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
     <textarea
       {...props}
       className={cn(
-        "w-full rounded-lg border border-input bg-background/60 px-3 py-2 font-mono text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/40 focus:outline-none transition-all",
+        "w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/40 focus:outline-none transition-colors duration-(--dur-micro)",
         className,
       )}
     />
@@ -92,19 +92,19 @@ export function Panel({
   icon?: ReactNode;
 }) {
   return (
-    <section className={cn("panel rise-in p-5", className)}>
+    <section className={cn("panel p-5", className)}>
       {(title || action) && (
         <header className="mb-4 flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             {icon && (
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 text-primary">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 border border-primary/25 text-primary">
                 {icon}
               </span>
             )}
             <div>
               {title && (
-                <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
-                  <span className="size-2 shrink-0 rounded-full bg-gradient-to-br from-primary to-accent shadow-[0_0_10px_oklch(0.86_0.19_124/0.7)]" />
+                <h2 className="flex items-center gap-2 text-base font-medium">
+                  <span className="h-3.5 w-[2px] shrink-0 rounded-[1px] bg-primary" />
                   {title}
                 </h2>
               )}
@@ -132,7 +132,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium",
         tone === "muted" && "bg-secondary text-muted-foreground",
         tone === "success" && "bg-success/15 text-success",
         tone === "danger" && "bg-destructive/15 text-destructive",
@@ -162,16 +162,14 @@ export function ProgressBar({
   const percent = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
     <div className={cn("w-full", className)}>
-      <div className="h-2.5 overflow-hidden rounded-full bg-secondary relative">
+      <div className="h-2 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
         <div
-          className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-500 ease-out shadow-[0_0_12px_oklch(0.86_0.19_124/0.5)]"
-          style={{ width: `${percent}%` }}
+          className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-(--dur-short) ease-out"
+          style={{ transform: `scaleX(${percent / 100})` }}
         />
-        {/* shimmer effect */}
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-pulse" />
       </div>
       {showLabel && (
-        <p className="mt-1.5 text-xs text-muted-foreground">
+        <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
           {value.toLocaleString()} of {max.toLocaleString()} ({percent}%)
         </p>
       )}
@@ -196,21 +194,19 @@ export function StatCard({
   trend?: { value: number; label: string };
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-border bg-surface/60 px-4 py-3.5 transition-all hover:border-primary/40 hover:bg-surface hover:shadow-[0_16px_36px_-18px_oklch(0_0_0/0.8)]">
+    <div className="group relative overflow-hidden rounded-xl border border-border bg-surface px-4 py-3.5 transition-colors hover:border-input">
       <div className="flex items-center justify-between">
-        <dt className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-          {label}
-        </dt>
+        <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
         {icon && (
           <span className={cn("flex size-6 items-center justify-center", iconClass)}>{icon}</span>
         )}
       </div>
-      <dd className={cn("mt-1.5 font-display text-2xl font-semibold tabular-nums", tone)}>
+      <dd className={cn("mt-1.5 font-mono text-xl font-medium tabular-nums tracking-tight", tone)}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </dd>
       {trend && (
         <div className="mt-1.5">
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground tabular-nums">
             {trend.value > 0 ? "+" : ""}
             {trend.value.toLocaleString()} {trend.label}
           </span>
